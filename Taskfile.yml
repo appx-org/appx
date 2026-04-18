@@ -1,0 +1,86 @@
+version: "3"
+
+tasks:
+  build:
+    desc: Build frontend and Go binary
+    deps: [web]
+    env:
+      GOCACHE: "{{.ROOT_DIR}}/.go-build-cache"
+    cmds:
+      - go build -o appx ./cmd/appx
+
+  web:
+    desc: Build frontend and copy to embed directory
+    cmds:
+      - cd web && npm install
+      - cd web && npm run build
+      - rm -rf cmd/appx/web/dist
+      - mkdir -p cmd/appx/web
+      - cp -r web/dist cmd/appx/web/dist
+    sources:
+      - web/src/**/*
+      - web/index.html
+      - web/package.json
+      - web/package-lock.json
+      - web/vite.config.ts
+      - web/tsconfig*.json
+    generates:
+      - cmd/appx/web/dist/**/*
+
+  dev:
+    desc: Start Vite dev server with hot reload
+    dir: web
+    cmds:
+      - npm run dev
+
+  test:
+    desc: Run all Go tests
+    env:
+      GOCACHE: "{{.ROOT_DIR}}/.go-build-cache"
+    cmds:
+      - go test ./internal/...
+
+  lint:
+    desc: Lint frontend code
+    dir: web
+    cmds:
+      - npm run lint
+
+  server:bootstrap:
+    desc: First-time server setup — create users/dirs, install tools, build, start services
+    cmds:
+      - sudo ./deploy/bootstrap.sh
+
+  server:deploy:
+    desc: Pull latest, rebuild, install binary, update tools/config, restart services, verify
+    cmds:
+      - git pull
+      - task build
+      - sudo install -m 750 -o root -g appx ./appx /usr/local/bin/appx
+      - sudo ./deploy/tools-install.sh
+      - sudo ./deploy/system-setup.sh
+      - sudo systemctl restart opencode appx
+      - sudo ./deploy/verify-installation.sh
+
+  server:verify:
+    desc: Run post-deploy verification suite
+    cmds:
+      - sudo ./deploy/verify-installation.sh
+
+  run:
+    desc: Run the appx server on port 8443
+    cmds:
+      - ./appx -http -port 8443
+
+  restart:
+    desc: Rebuild frontend + binary then run on port 8443
+    deps: [build]
+    cmds:
+      - task: run
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -f appx
+      - rm -rf cmd/appx/web/dist
+      - rm -rf web/dist

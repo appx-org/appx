@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS egress_log;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS projects;

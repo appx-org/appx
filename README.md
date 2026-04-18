@@ -1,0 +1,219 @@
+# Appx
+
+Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents powered by [OpenCode](https://github.com/anomalyco/opencode).
+
+## What it does
+
+Appx is a management shell for running OpenCode agents on a remote server. It provides authentication, TLS termination, a web dashboard, and a reverse proxy — so you can manage projects, chat with agents, and access agent-built apps from a browser over HTTPS.
+
+## Architecture
+
+```
+Browser
+  └── HTTPS (single port)
+        ├── /              React SPA (embedded in binary)
+        ├── /api/*         REST API (auth, projects, settings)
+        ├── /api/opencode/* Reverse proxy → OpenCode server
+        └── <project>.localhost  Reverse proxy → agent-built apps
+```
+
+Everything is a single Go binary. The React frontend is compiled and embedded at build time. State lives in a SQLite database on disk.
+
+OpenCode runs as a **separate process** on `localhost:4096` and handles all AI agent work (sessions, tool execution, file editing, terminal). Appx proxies requests to it and adds auth + TLS on top.
+
+**Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
+
+**TLS**: self-signed ECDSA P-256 certificate auto-generated on first run, auto-renewed 7 days before expiry. For production, use `-domain` with `CLOUDFLARE_API_TOKEN` for Let's Encrypt certificates.
+
+## Prerequisites
+
+- Linux host (Ubuntu/Debian, amd64 or arm64)
+- `git` and [Task](https://taskfile.dev) — installed manually before bootstrap (see Initial setup below)
+- Go 1.26+, Node.js 24+, and all agent tools — installed automatically by `task server:bootstrap`
+
+## Self-Hosting
+
+### Private repo: deploy key setup
+
+If the repo is private, set up a read-only deploy key on the server before cloning. This is a one-time step.
+
+```bash
+# Generate a deploy key (no passphrase — runs unattended on the server)
+ssh-keygen -t ed25519 -f ~/.ssh/appx_deploy -N "" -C "appx-server-deploy"
+
+# Print the public key — copy the output
+cat ~/.ssh/appx_deploy.pub
+```
+
+On GitHub: **repo → Settings → Deploy keys → Add deploy key**. Paste the public key. Leave "Allow write access" unchecked — the server only needs to pull.
+
+```bash
+# Tell SSH to use this key for github.com
+cat >> ~/.ssh/config << 'EOF'
+Host github.com
+  IdentityFile ~/.ssh/appx_deploy
+  IdentitiesOnly yes
+EOF
+```
+
+### Initial setup
+
+```bash
+# Install git and Task (the only two prerequisites — everything else is installed by bootstrap)
+sudo apt-get install -y git
+# https://taskfile.dev/docs/installation
+curl -1sLf 'https://dl.cloudsmith.io/public/task/task/setup.deb.sh' | sudo -E bash
+sudo apt-get install -y task
+
+# Use the SSH URL if the repo is private (deploy key must be set up first — see above)
+git clone git@github.com:neuromaxer/appx.git /srv/appx
+cd /srv/appx
+task server:bootstrap
+```
+
+On first run, bootstrap prompts for server configuration:
+
+```
+Server IP or hostname [auto-detected: 138.x.x.x]:
+Data directory [/var/lib/appx]: /mnt/vol/appx-data
+Port [443]:
+```
+
+Press Enter to accept defaults. The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
+
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
+
+On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
+
+Bootstrap installs these tools system-wide so agents can use them in the terminal or via agent:
+
+- **Go** — compiled from the version in `go.mod`
+- **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
+- **uv** — Python version and package management (self-update: `uv self update`)
+- **OpenCode** — AI agent backend (pinned version in `deploy/opencode-version`)
+- **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
+
+### Updating appx
+
+After pushing a new release:
+
+```bash
+cd /srv/appx
+task server:deploy
+```
+
+Pulls latest code, rebuilds, installs the binary, updates OpenCode to the pinned version, and restarts both services.
+
+### Updating OpenCode version
+
+Edit `deploy/opencode-version` to the new version, then:
+
+```bash
+cd /srv/appx
+task server:deploy
+```
+
+### Updating Claude Code
+
+```bash
+sudo npm install -g @anthropic-ai/claude-code
+```
+
+No service restart needed — it's a CLI tool.
+
+### Verify installation
+
+```bash
+sudo ./deploy/verify-installation.sh
+```
+
+Checks users, permissions, isolation, tools, service files, and runtime. Exits 0 only if everything is correct.
+
+### Troubleshoot
+
+```bash
+journalctl -u appx -f          # appx logs
+journalctl -u opencode -f      # opencode logs
+```
+
+### Deploy scripts
+
+| File / Script                   | When             | What                                                       |
+| ------------------------------- | ---------------- | ---------------------------------------------------------- |
+| `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
+| `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, opencode config |
+| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, OpenCode (pinned), Claude Code, uv         |
+| `deploy/opencode.json`          | Model changes    | Default OpenCode model config (copied to opencode home)    |
+| `deploy/opencode-version`       | Version pin      | Pinned OpenCode version installed by tools-install         |
+| `deploy/verify-installation.sh` | After any change | Full system verification                                   |
+
+## Local development
+
+```bash
+# HTTP mode (no TLS, localhost only)
+./appx --http -port 8080
+
+# Or with hot-reload frontend
+task dev            # Vite dev server in one terminal
+./appx --http       # appx in another
+```
+
+## Persistent storage
+
+All state lives in the data directory (configured during bootstrap, default `/var/lib/appx`):
+
+| Contents                      | Path                       | Access    |
+| ----------------------------- | -------------------------- | --------- |
+| SQLite DB, TLS certs, secrets | `{data}/.appx-internals/`  | appx only |
+| Project directories           | `{data}/projects/`         | shared    |
+
+To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
+
+## Automatic TLS via Let's Encrypt
+
+Uncomment and fill in the two variables in `/etc/appx/appx.env`:
+
+```bash
+APPX_DOMAIN=app.yourdomain.com
+CLOUDFLARE_API_TOKEN=your_token_here
+```
+
+Then restart: `sudo systemctl restart appx`.
+
+Appx requests certificates for `app.yourdomain.com` and `*.app.yourdomain.com` via Cloudflare DNS-01 challenge. No port 80 required.
+
+Requirements:
+
+- Cloudflare API token with **Zone > DNS > Edit** permissions
+- Domain managed by Cloudflare DNS
+
+## User isolation
+
+Bootstrap creates two OS users with a shared `projects` group:
+
+```
+appx      — runs the appx server, owns DB and TLS certs
+opencode  — runs OpenCode, cannot access appx data
+projects  — shared group, both users read/write project directories
+```
+
+Directory permissions prevent OpenCode (and any agent it spawns) from accessing the appx database, TLS keys, or binary. Project directories use setgid so files created by either user are accessible to both.
+
+## Development
+
+```bash
+task build          # Build frontend + Go binary → ./appx
+task dev            # Vite dev server (hot reload)
+task test           # Run all Go tests
+task server:bootstrap   # First-time server setup
+task server:deploy      # Pull, build, install, restart
+task server:verify      # Post-deploy verification
+```
+
+See [CLAUDE.md](CLAUDE.md) for architecture details and development conventions.
+
+## Caveats
+
+- **Self-signed TLS (default).** Browsers show a security warning. Use `-domain` for automatic Let's Encrypt.
+- **Single-user only.** One password, one session store. Designed for personal use.
+- **Port 443 requires root.** Use `-port 8443` or grant `CAP_NET_BIND_SERVICE` (bootstrap handles this).

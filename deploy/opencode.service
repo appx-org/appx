@@ -1,0 +1,41 @@
+[Unit]
+Description=OpenCode Server — AI agent backend for Appx
+Documentation=https://github.com/sst/opencode
+After=network.target
+Before=appx.service
+# Restart aggressively — if opencode crashes, appx will reconnect automatically
+# once systemd revives it.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+User=opencode
+Group=opencode
+
+Environment=HOME=/home/opencode
+
+# Route all HTTPS traffic through appx's egress CONNECT proxy on 127.0.0.1:9080.
+# This provides allowlist enforcement and request logging via the Egress UI.
+#
+# NOTE: opencode starts before appx (Before=appx.service), so there is a brief
+# window at startup where the proxy isn't available yet. This is harmless —
+# opencode doesn't make outbound HTTPS requests during its own startup. Agent
+# HTTPS calls only happen after a user sends a message, by which time appx
+# (and the egress proxy) is running.
+Environment=HTTPS_PROXY=http://127.0.0.1:9080
+# Prevent internal traffic (localhost API calls) from going through the proxy.
+Environment=NO_PROXY=localhost,127.0.0.1
+
+# Binary installed to /usr/local/bin by deploy/tools-install.sh.
+# WorkingDirectory is rewritten by system-setup.sh to the shared projects dir.
+ExecStart=/usr/local/bin/opencode serve --hostname 127.0.0.1 --port 4096
+WorkingDirectory=/var/lib/appx/projects
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

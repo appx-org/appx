@@ -1,0 +1,27 @@
+# Build output
+/appx
+cmd/appx/web/
+.go-build-cache/
+
+# Data
+data/
+.env
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Education / learning materials
+docs/edu/
+docs/misc/
+
+# Task
+.task/
+.superpowers/
+
+# OS
+.DS_Store
+
+# Claude
+.claude/worktrees/
+.worktrees/

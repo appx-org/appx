@@ -1,0 +1,169 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #060c0e;
+  --surface: #0d1214;
+  --surface-hover: #111a1e;
+  --border: rgba(0, 229, 255, 0.15);
+  --text: #e2f4f8;
+  --muted: #7ab8c8;
+  --subtle: #1a2c30;
+
+  --cyan: #00e5ff;
+  --cyan-dim: rgba(0, 229, 255, 0.1);
+
+  --green: #3ddc84;
+  --green-dim: rgba(61, 220, 132, 0.1);
+  --red: #ff6b6b;
+  --red-dim: rgba(255, 107, 107, 0.1);
+  --yellow: #f5c518;
+  --yellow-dim: rgba(245, 197, 24, 0.1);
+  --blue: #0369a1;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+input {
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Project card hover */
+[data-card="project"] {
+  transition: background 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+[data-card="project"]:hover {
+  background: var(--surface-hover) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  transform: translateY(-1px);
+}
+
+/* Outlined action buttons */
+[data-btn="outline-green"] {
+  transition: background 0.12s ease;
+}
+
+[data-btn="outline-green"]:hover:not(:disabled) {
+  background: var(--green-dim) !important;
+}
+
+[data-btn="outline-red"] {
+  transition: background 0.12s ease;
+}
+
+[data-btn="outline-red"]:hover:not(:disabled) {
+  background: var(--red-dim) !important;
+}
+
+/* Text buttons */
+[data-btn="text"] {
+  transition: color 0.12s ease;
+}
+
+[data-btn="text"]:hover:not(:disabled) {
+  color: var(--text) !important;
+}
+
+[data-btn="text-red"] {
+  transition: color 0.12s ease;
+}
+
+[data-btn="text-red"]:hover:not(:disabled) {
+  color: var(--red) !important;
+}
+
+[data-btn="text-nav"] {
+  transition: color 0.12s ease;
+}
+
+[data-btn="text-nav"]:hover:not(:disabled) {
+  color: var(--text) !important;
+}
+
+/* Login button */
+[data-btn="login"] {
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+[data-btn="login"]:hover {
+  background: #fff !important;
+  color: #000 !important;
+  border-color: #fff !important;
+}
+
+/* Primary CTA hover */
+[data-btn="primary"] {
+  transition: opacity 0.12s ease;
+}
+
+[data-btn="primary"]:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+/* New Project button */
+[data-btn="new-project"] {
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+[data-btn="new-project"]:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Card mount animation */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Modal fade in */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+[data-overlay] {
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
