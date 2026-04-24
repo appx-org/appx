@@ -124,6 +124,7 @@ func collectSANs(hosts []string) ([]net.IP, []string) {
 			ipSet[h] = ip
 		} else {
 			dnsSet[h] = true
+			dnsSet["*."+h] = true
 		}
 	}
 
