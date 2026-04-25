@@ -165,8 +165,11 @@ echo ""
 # ---------------------------------------------------------------------------
 
 STEP="restart-services"
-echo "restarting services..."
-systemctl restart opencode appx
+echo "stopping services..."
+systemctl stop opencode appx 2>/dev/null || true
+sleep 2
+echo "starting services..."
+systemctl start opencode appx
 echo "services restarted"
 
 echo ""
