@@ -29,6 +29,16 @@ if [ -f "$ENV_FILE" ]; then
 else
   echo "=== Server Configuration ==="
   echo ""
+  echo "  Hostname: uses sslip.io by default (free wildcard DNS) so subdomain"
+  echo "  routing works for agent-built apps. Use your own domain if you have one."
+  echo ""
+  echo "  Examples:"
+  echo "    138.199.158.226.sslip.io    (default — subdomain routing works)"
+  echo "    app.example.com             (custom domain — set APPX_DOMAIN later for Let's Encrypt)"
+  echo ""
+  echo "  Data directory: stores the DB, TLS certs, and project files."
+  echo "  Use a mounted volume path if your root disk is small."
+  echo ""
 
   # Auto-detect public IP and default to sslip.io hostname for subdomain support.
   DEFAULT_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || echo "")

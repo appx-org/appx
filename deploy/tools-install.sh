@@ -152,7 +152,7 @@ if [ -n "$OPENCODE_VERSION" ]; then
     echo "opencode already at $WANT"
   else
     echo "pinning opencode to $OPENCODE_VERSION..."
-    /usr/local/bin/opencode upgrade "$OPENCODE_VERSION"
+    /usr/local/bin/opencode upgrade "$OPENCODE_VERSION" -m npm
     echo "opencode pinned to $OPENCODE_VERSION"
     # Re-copy in case the upgrade replaced the binary in ~/.opencode/bin/.
     for candidate in \

@@ -77,9 +77,13 @@ Port [443]:
 
 Press Enter to accept defaults. The hostname defaults to `<your-ip>.sslip.io` which provides free wildcard DNS — this enables subdomain routing for agent-built apps (e.g. `https://myapp.138.x.x.x.sslip.io`). You can also use your own domain here.
 
+If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes), mount it first (Volumes -> Show configuration in Hetzner console) and enter the mount path as the data directory.
+
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
 Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
+
+During Opencode installation you might be prompted "opencode is installed to /usr/local/bin/opencode and may be managed by a package manager". Select `Install anyways? Yes`
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
@@ -161,10 +165,10 @@ task dev            # Vite dev server in one terminal
 
 All state lives in the data directory (configured during bootstrap, default `/var/lib/appx`):
 
-| Contents                      | Path                       | Access    |
-| ----------------------------- | -------------------------- | --------- |
-| SQLite DB, TLS certs, secrets | `{data}/.appx-internals/`  | appx only |
-| Project directories           | `{data}/projects/`         | shared    |
+| Contents                      | Path                      | Access    |
+| ----------------------------- | ------------------------- | --------- |
+| SQLite DB, TLS certs, secrets | `{data}/.appx-internals/` | appx only |
+| Project directories           | `{data}/projects/`        | shared    |
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 
@@ -186,6 +190,7 @@ sudo systemctl restart appx
 ```
 
 This gives you:
+
 - `https://91.98.144.204.sslip.io` — dashboard
 - `https://assistum.91.98.144.204.sslip.io` — project subdomain
 - Session cookie shared across all subdomains via `Domain=.91.98.144.204.sslip.io`
