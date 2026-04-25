@@ -33,6 +33,19 @@ case "$ARCH" in
 esac
 
 # ---------------------------------------------------------------------------
+# Task (taskfile.dev build runner)
+# ---------------------------------------------------------------------------
+
+if command -v task >/dev/null 2>&1; then
+  echo "task already installed: $(task --version 2>/dev/null)"
+else
+  echo "installing task..."
+  curl -1sLf 'https://dl.cloudsmith.io/public/task/task/setup.deb.sh' | bash
+  apt-get install -y task
+  echo "task installed: $(task --version 2>/dev/null)"
+fi
+
+# ---------------------------------------------------------------------------
 # Go
 # ---------------------------------------------------------------------------
 
@@ -202,6 +215,7 @@ fi
 echo ""
 echo "Tools install complete."
 echo ""
+echo "  task:     $(task --version 2>/dev/null || echo 'not found')"
 echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"

@@ -14,7 +14,7 @@ Browser
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
         ├── /api/opencode/* Reverse proxy → OpenCode server
-        └── <project>.localhost  Reverse proxy → agent-built apps
+        └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
 Everything is a single Go binary. The React frontend is compiled and embedded at build time. State lives in a SQLite database on disk.
@@ -28,8 +28,8 @@ OpenCode runs as a **separate process** on `localhost:4096` and handles all AI a
 ## Prerequisites
 
 - Linux host (Ubuntu/Debian, amd64 or arm64)
-- `git` and [Task](https://taskfile.dev) — installed manually before bootstrap (see Initial setup below)
-- Go 1.26+, Node.js 24+, and all agent tools — installed automatically by `task server:bootstrap`
+- `git` — installed manually before bootstrap
+- Go, Node.js, Task, and all agent tools — installed automatically by bootstrap
 
 ## Self-Hosting
 
@@ -59,16 +59,12 @@ EOF
 ### Initial setup
 
 ```bash
-# Install git and Task (the only two prerequisites — everything else is installed by bootstrap)
 sudo apt-get install -y git
-# https://taskfile.dev/docs/installation
-curl -1sLf 'https://dl.cloudsmith.io/public/task/task/setup.deb.sh' | sudo -E bash
-sudo apt-get install -y task
 
 # Use the SSH URL if the repo is private (deploy key must be set up first — see above)
 git clone git@github.com:neuromaxer/appx.git /srv/appx
 cd /srv/appx
-task server:bootstrap
+sudo ./deploy/bootstrap.sh
 ```
 
 On first run, bootstrap prompts for server configuration:
@@ -87,6 +83,7 @@ On first run, a random password is written to `{data-dir}/initial_password`. Del
 
 Bootstrap installs these tools system-wide so agents can use them in the terminal or via agent:
 
+- **Task** — [taskfile.dev](https://taskfile.dev) build runner
 - **Go** — compiled from the version in `go.mod`
 - **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
 - **uv** — Python version and package management (self-update: `uv self update`)
