@@ -105,13 +105,16 @@ else
 
   # Install the pinned major version and symlink binaries system-wide.
   nvm install "$NODE_MAJOR"
-  NODE_BIN_DIR="$(dirname "$(nvm which $NODE_MAJOR)")"
   for bin in node npm npx; do
-    ln -sf "$NODE_BIN_DIR/$bin" "/usr/local/bin/$bin"
+    ln -sf "$(nvm which $NODE_MAJOR | xargs dirname)/$bin" "/usr/local/bin/$bin"
   done
 
   echo "node installed: $(/usr/local/bin/node --version)"
 fi
+
+# Resolve the nvm bin directory where npm install -g puts binaries.
+# Follow the /usr/local/bin/node symlink back to the nvm versioned directory.
+NODE_BIN_DIR="$(dirname "$(readlink -f /usr/local/bin/node)")"
 
 # ---------------------------------------------------------------------------
 # OpenCode (installed via npm, pinned to deploy/opencode-version)
@@ -132,6 +135,7 @@ if [ -n "$OPENCODE_NPM_VERSION" ] && [ "$CURRENT" = "$OPENCODE_NPM_VERSION" ]; t
 else
   echo "installing opencode${OPENCODE_NPM_VERSION:+ $OPENCODE_NPM_VERSION} via npm..."
   npm install -g "opencode-ai@${OPENCODE_NPM_VERSION:-latest}"
+  ln -sf "$NODE_BIN_DIR/opencode" /usr/local/bin/opencode
   echo "opencode installed: $(/usr/local/bin/opencode --version 2>/dev/null)"
 fi
 
@@ -144,16 +148,8 @@ if command -v claude >/dev/null 2>&1; then
 else
   echo "installing claude..."
   npm install -g @anthropic-ai/claude-code
+  ln -sf "$NODE_BIN_DIR/claude" /usr/local/bin/claude
   echo "claude installed"
-fi
-
-# Ensure claude is in /usr/local/bin (npm -g usually puts it there already).
-if command -v claude >/dev/null 2>&1; then
-  CLAUDE_PATH=$(command -v claude)
-  if [ "$CLAUDE_PATH" != "/usr/local/bin/claude" ] && [ ! -x /usr/local/bin/claude ]; then
-    ln -sf "$CLAUDE_PATH" /usr/local/bin/claude
-    echo "linked claude → /usr/local/bin/claude"
-  fi
 fi
 
 # ---------------------------------------------------------------------------
