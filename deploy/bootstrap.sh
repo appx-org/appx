@@ -170,7 +170,12 @@ systemctl stop opencode appx 2>/dev/null || true
 sleep 2
 echo "starting services..."
 systemctl start opencode appx
-echo "services restarted"
+echo "waiting for services to be ready..."
+for i in $(seq 1 10); do
+  curl -sf http://127.0.0.1:4096/health >/dev/null 2>&1 && break
+  sleep 2
+done
+echo "services started"
 
 echo ""
 

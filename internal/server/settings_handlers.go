@@ -106,6 +106,8 @@ func handleSetAPIKey(store *auth.Store, oc *opencode.Client) http.HandlerFunc {
 		if oc != nil {
 			if err := oc.SetAuth("anthropic", req.Key); err != nil {
 				log.Printf("settings: failed to inject key into OpenCode: %v", err)
+			} else if err := oc.DisposeAll(); err != nil {
+				log.Printf("settings: failed to reload OpenCode instances: %v", err)
 			}
 		}
 
