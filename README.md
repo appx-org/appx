@@ -70,12 +70,14 @@ sudo ./deploy/bootstrap.sh
 On first run, bootstrap prompts for server configuration:
 
 ```
-Server IP or hostname [auto-detected: 138.x.x.x]:
+Server hostname [138.x.x.x.sslip.io]:
 Data directory [/var/lib/appx]: /mnt/vol/appx-data
 Port [443]:
 ```
 
-Press Enter to accept defaults. The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
+Press Enter to accept defaults. The hostname defaults to `<your-ip>.sslip.io` which provides free wildcard DNS — this enables subdomain routing for agent-built apps (e.g. `https://myapp.138.x.x.x.sslip.io`). You can also use your own domain here.
+
+The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
 Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
 

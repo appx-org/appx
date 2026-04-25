@@ -30,11 +30,15 @@ else
   echo "=== Server Configuration ==="
   echo ""
 
-  # Auto-detect public IP.
+  # Auto-detect public IP and default to sslip.io hostname for subdomain support.
   DEFAULT_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || echo "")
+  DEFAULT_HOST=""
+  if [ -n "$DEFAULT_IP" ]; then
+    DEFAULT_HOST="${DEFAULT_IP}.sslip.io"
+  fi
 
-  read -rp "Server IP or hostname [${DEFAULT_IP:-none detected}]: " INPUT_HOST
-  APPX_HOST="${INPUT_HOST:-$DEFAULT_IP}"
+  read -rp "Server hostname [${DEFAULT_HOST:-none detected}]: " INPUT_HOST
+  APPX_HOST="${INPUT_HOST:-$DEFAULT_HOST}"
 
   read -rp "Data directory [/var/lib/appx]: " INPUT_DATA
   APPX_DATA="${INPUT_DATA:-/var/lib/appx}"
@@ -52,25 +56,25 @@ else
 #
 # Examples:
 #
-#   Single server with IP access:
-#     APPX_HOST=138.199.158.226
+#   Default (sslip.io — free wildcard DNS, enables subdomain routing):
+#     APPX_HOST=138.199.158.226.sslip.io
 #     APPX_DATA=/var/lib/appx
 #     APPX_PORT=443
 #
 #   Server with mounted volume:
-#     APPX_HOST=138.199.158.226
+#     APPX_HOST=138.199.158.226.sslip.io
 #     APPX_DATA=/mnt/vol/appx-data
 #     APPX_PORT=443
 #
 #   Custom domain with Let's Encrypt:
-#     APPX_HOST=138.199.158.226
+#     APPX_HOST=138.199.158.226.sslip.io
 #     APPX_DATA=/var/lib/appx
 #     APPX_PORT=443
 #     APPX_DOMAIN=app.example.com
 #     CLOUDFLARE_API_TOKEN=your_token_here
 #
 # All variables:
-#   APPX_HOST   — your server IP or hostname (added to TLS cert and router) 
+#   APPX_HOST   — server hostname for TLS cert and routing (default: <ip>.sslip.io)
 #   APPX_DATA   — data directory: DB, TLS certs, projects (default: /var/lib/appx)
 #   APPX_PORT   — listen port (default: 443). MUST be open in firewall
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
