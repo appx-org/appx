@@ -33,6 +33,29 @@ OpenCode runs as a **separate process** on `localhost:4096` and handles all AI a
 
 ## Self-Hosting
 
+### Private repo: deploy key setup
+
+If the repo is private, set up a read-only deploy key on the server before cloning. This is a one-time step.
+
+```bash
+# Generate a deploy key (no passphrase — runs unattended on the server)
+ssh-keygen -t ed25519 -f ~/.ssh/appx_deploy -N "" -C "appx-server-deploy"
+
+# Print the public key — copy the output
+cat ~/.ssh/appx_deploy.pub
+```
+
+On GitHub: **repo → Settings → Deploy keys → Add deploy key**. Paste the public key. Leave "Allow write access" unchecked — the server only needs to pull.
+
+```bash
+# Tell SSH to use this key for github.com
+cat >> ~/.ssh/config << 'EOF'
+Host github.com
+  IdentityFile ~/.ssh/appx_deploy
+  IdentitiesOnly yes
+EOF
+```
+
 ### Initial setup
 
 ```bash

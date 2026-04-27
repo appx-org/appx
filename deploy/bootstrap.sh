@@ -52,6 +52,7 @@ else
 
   read -rp "Data directory [/var/lib/appx]: " INPUT_DATA
   APPX_DATA="${INPUT_DATA:-/var/lib/appx}"
+  APPX_DATA="${APPX_DATA%/}"
 
   read -rp "Port [443]: " INPUT_PORT
   APPX_PORT="${INPUT_PORT:-443}"

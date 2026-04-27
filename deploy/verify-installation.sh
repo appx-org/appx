@@ -24,7 +24,7 @@ ENV_FILE="/etc/appx/appx.env"
 if [ -f "$ENV_FILE" ]; then
   _APPX_DATA=$(grep '^APPX_DATA=' "$ENV_FILE" | cut -d= -f2- || true)
   if [ -n "$_APPX_DATA" ]; then
-    DATA_DIR="$_APPX_DATA"
+    DATA_DIR="${_APPX_DATA%/}"
   fi
 fi
 echo "data directory: $DATA_DIR"
