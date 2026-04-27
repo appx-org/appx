@@ -5,9 +5,9 @@ Agentic Application Proxy — self-hostable tool to build and host personal apps
 ## Quick Reference
 
 ```bash
-task build          # Build frontend + Go binary → ./appx
+task local          # Build and run appx in HTTP dev mode (127.0.0.1.sslip.io, port 8080)
+task build          # Build frontend + Go binary → ./appx (without running)
 task web            # Build frontend only, copy to cmd/appx/web/dist
-task dev            # Vite dev server for frontend (hot reload)
 task test           # Run all Go tests
 task lint           # Lint frontend
 task clean          # Remove build artifacts

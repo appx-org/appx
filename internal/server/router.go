@@ -149,6 +149,10 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 				w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 			}
 
+			// Remove write deadline so long-lived connections (SSE, WebSocket)
+			// are not killed by the server's WriteTimeout.
+			http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 			target, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", proj.AssignedPort))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)

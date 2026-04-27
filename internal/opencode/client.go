@@ -71,6 +71,25 @@ func (c *Client) ListProjects() ([]OpenCodeProject, error) {
 	return projects, nil
 }
 
+// DisposeAll calls POST /global/dispose to tear down all cached instances.
+// The next request triggers fresh initialization, picking up any auth changes.
+func (c *Client) DisposeAll() error {
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/global/dispose", nil)
+	if err != nil {
+		return fmt.Errorf("opencode dispose: new request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("opencode dispose: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseSize))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("opencode dispose: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // SetAuth injects an API key for the given provider into the OpenCode server.
 // It calls PUT /auth/:providerID with body {"type":"api","key":"<apiKey>"}.
 // This matches the OpenCode server's auth endpoint schema (server.ts:99-129).

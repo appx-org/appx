@@ -97,6 +97,12 @@ func main() {
 
 	authStore := auth.NewStore(database)
 
+	// Log the server URL before any background goroutines emit their own logs.
+	if *httpMode {
+		log.Printf("WARNING: running in HTTP mode -- for local development only")
+		log.Printf("Appx running on http://%s:%d", baseDomain, *port)
+	}
+
 	// Start egress CONNECT proxy for outbound traffic control.
 	egressStore := egress.NewStore(database)
 	egressProxy := egress.NewProxy(egressStore)

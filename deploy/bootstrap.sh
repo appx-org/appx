@@ -29,15 +29,30 @@ if [ -f "$ENV_FILE" ]; then
 else
   echo "=== Server Configuration ==="
   echo ""
+  echo "  Hostname: uses sslip.io by default (free wildcard DNS) so subdomain"
+  echo "  routing works for agent-built apps. Use your own domain if you have one."
+  echo ""
+  echo "  Examples:"
+  echo "    138.199.158.226.sslip.io    (default — subdomain routing works)"
+  echo "    app.example.com             (custom domain — set APPX_DOMAIN later for Let's Encrypt)"
+  echo ""
+  echo "  Data directory: stores the DB, TLS certs, and project files."
+  echo "  Use a mounted volume path if your root disk is small."
+  echo ""
 
-  # Auto-detect public IP.
+  # Auto-detect public IP and default to sslip.io hostname for subdomain support.
   DEFAULT_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || echo "")
+  DEFAULT_HOST=""
+  if [ -n "$DEFAULT_IP" ]; then
+    DEFAULT_HOST="${DEFAULT_IP}.sslip.io"
+  fi
 
-  read -rp "Server IP or hostname [${DEFAULT_IP:-none detected}]: " INPUT_HOST
-  APPX_HOST="${INPUT_HOST:-$DEFAULT_IP}"
+  read -rp "Server hostname [${DEFAULT_HOST:-none detected}]: " INPUT_HOST
+  APPX_HOST="${INPUT_HOST:-$DEFAULT_HOST}"
 
   read -rp "Data directory [/var/lib/appx]: " INPUT_DATA
   APPX_DATA="${INPUT_DATA:-/var/lib/appx}"
+  APPX_DATA="${APPX_DATA%/}"
 
   read -rp "Port [443]: " INPUT_PORT
   APPX_PORT="${INPUT_PORT:-443}"
@@ -52,25 +67,25 @@ else
 #
 # Examples:
 #
-#   Single server with IP access:
-#     APPX_HOST=138.199.158.226
+#   Default (sslip.io — free wildcard DNS, enables subdomain routing):
+#     APPX_HOST=138.199.158.226.sslip.io
 #     APPX_DATA=/var/lib/appx
 #     APPX_PORT=443
 #
 #   Server with mounted volume:
-#     APPX_HOST=138.199.158.226
+#     APPX_HOST=138.199.158.226.sslip.io
 #     APPX_DATA=/mnt/vol/appx-data
 #     APPX_PORT=443
 #
 #   Custom domain with Let's Encrypt:
-#     APPX_HOST=138.199.158.226
+#     APPX_HOST=138.199.158.226.sslip.io
 #     APPX_DATA=/var/lib/appx
 #     APPX_PORT=443
 #     APPX_DOMAIN=app.example.com
 #     CLOUDFLARE_API_TOKEN=your_token_here
 #
 # All variables:
-#   APPX_HOST   — your server IP or hostname (added to TLS cert and router) 
+#   APPX_HOST   — server hostname for TLS cert and routing (default: <ip>.sslip.io)
 #   APPX_DATA   — data directory: DB, TLS certs, projects (default: /var/lib/appx)
 #   APPX_PORT   — listen port (default: 443). MUST be open in firewall
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
@@ -151,9 +166,17 @@ echo ""
 # ---------------------------------------------------------------------------
 
 STEP="restart-services"
-echo "restarting services..."
-systemctl restart opencode appx
-echo "services restarted"
+echo "stopping services..."
+systemctl stop opencode appx 2>/dev/null || true
+sleep 2
+echo "starting services..."
+systemctl start opencode appx
+echo "waiting for services to be ready..."
+for i in $(seq 1 10); do
+  curl -sf http://127.0.0.1:4096/health >/dev/null 2>&1 && break
+  sleep 2
+done
+echo "services started"
 
 echo ""
 

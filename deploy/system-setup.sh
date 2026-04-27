@@ -34,7 +34,7 @@ if [ -f /etc/appx/appx.env ]; then
   # shellcheck source=/dev/null
   _APPX_DATA=$(grep '^APPX_DATA=' /etc/appx/appx.env | cut -d= -f2- || true)
   if [ -n "$_APPX_DATA" ]; then
-    DATA_DIR="$_APPX_DATA"
+    DATA_DIR="${_APPX_DATA%/}"
   fi
 fi
 echo "data directory: $DATA_DIR"

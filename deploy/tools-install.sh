@@ -33,6 +33,19 @@ case "$ARCH" in
 esac
 
 # ---------------------------------------------------------------------------
+# Task (taskfile.dev build runner)
+# ---------------------------------------------------------------------------
+
+if command -v task >/dev/null 2>&1; then
+  echo "task already installed: $(task --version 2>/dev/null)"
+else
+  echo "installing task..."
+  curl -1sLf 'https://dl.cloudsmith.io/public/task/task/setup.deb.sh' | bash
+  apt-get install -y task
+  echo "task installed: $(task --version 2>/dev/null)"
+fi
+
+# ---------------------------------------------------------------------------
 # Go
 # ---------------------------------------------------------------------------
 
@@ -92,16 +105,19 @@ else
 
   # Install the pinned major version and symlink binaries system-wide.
   nvm install "$NODE_MAJOR"
-  NODE_BIN_DIR="$(dirname "$(nvm which $NODE_MAJOR)")"
   for bin in node npm npx; do
-    ln -sf "$NODE_BIN_DIR/$bin" "/usr/local/bin/$bin"
+    ln -sf "$(nvm which $NODE_MAJOR | xargs dirname)/$bin" "/usr/local/bin/$bin"
   done
 
   echo "node installed: $(/usr/local/bin/node --version)"
 fi
 
+# Resolve the nvm bin directory where npm install -g puts binaries.
+# Follow the /usr/local/bin/node symlink back to the nvm versioned directory.
+NODE_BIN_DIR="$(dirname "$(readlink -f /usr/local/bin/node)")"
+
 # ---------------------------------------------------------------------------
-# OpenCode (pinned to deploy/opencode-version)
+# OpenCode (installed via npm, pinned to deploy/opencode-version)
 # ---------------------------------------------------------------------------
 
 OPENCODE_VERSION=""
@@ -109,48 +125,18 @@ if [ -f "$SCRIPT_DIR/opencode-version" ]; then
   OPENCODE_VERSION=$(cat "$SCRIPT_DIR/opencode-version" | tr -d '[:space:]')
 fi
 
-if [ -x /usr/local/bin/opencode ]; then
-  echo "opencode already installed: $(/usr/local/bin/opencode --version 2>/dev/null || echo 'unknown')"
+# Strip leading 'v' for npm version syntax.
+OPENCODE_NPM_VERSION=$(echo "$OPENCODE_VERSION" | sed 's/^v//')
+
+CURRENT=$(/usr/local/bin/opencode --version 2>/dev/null || echo "")
+
+if [ -n "$OPENCODE_NPM_VERSION" ] && [ "$CURRENT" = "$OPENCODE_NPM_VERSION" ]; then
+  echo "opencode already at $OPENCODE_NPM_VERSION"
 else
-  echo "installing opencode..."
-  curl -fsSL https://opencode.ai/install | bash
-  echo "opencode installed"
-fi
-
-# Ensure opencode is in /usr/local/bin — the installer puts the binary in
-# ~/.opencode/bin/ which may not be in PATH for all users.
-if [ ! -x /usr/local/bin/opencode ]; then
-  for candidate in \
-      /root/.opencode/bin/opencode \
-      /home/opencode/.opencode/bin/opencode; do
-    if [ -x "$candidate" ]; then
-      install -m 755 "$candidate" /usr/local/bin/opencode
-      echo "copied opencode → /usr/local/bin/opencode"
-      break
-    fi
-  done
-fi
-
-# Pin to specific version if specified — skip if already at the right version.
-if [ -n "$OPENCODE_VERSION" ]; then
-  CURRENT=$(/usr/local/bin/opencode --version 2>/dev/null || echo "unknown")
-  WANT=$(echo "$OPENCODE_VERSION" | sed 's/^v//')
-  if [ "$CURRENT" = "$WANT" ]; then
-    echo "opencode already at $WANT"
-  else
-    echo "pinning opencode to $OPENCODE_VERSION..."
-    /usr/local/bin/opencode upgrade "$OPENCODE_VERSION"
-    echo "opencode pinned to $OPENCODE_VERSION"
-    # Re-copy in case the upgrade replaced the binary in ~/.opencode/bin/.
-    for candidate in \
-        /root/.opencode/bin/opencode \
-        /home/opencode/.opencode/bin/opencode; do
-      if [ -x "$candidate" ]; then
-        install -m 755 "$candidate" /usr/local/bin/opencode
-        break
-      fi
-    done
-  fi
+  echo "installing opencode${OPENCODE_NPM_VERSION:+ $OPENCODE_NPM_VERSION} via npm..."
+  npm install -g "opencode-ai@${OPENCODE_NPM_VERSION:-latest}"
+  ln -sf "$NODE_BIN_DIR/opencode" /usr/local/bin/opencode
+  echo "opencode installed: $(/usr/local/bin/opencode --version 2>/dev/null)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -162,16 +148,8 @@ if command -v claude >/dev/null 2>&1; then
 else
   echo "installing claude..."
   npm install -g @anthropic-ai/claude-code
+  ln -sf "$NODE_BIN_DIR/claude" /usr/local/bin/claude
   echo "claude installed"
-fi
-
-# Ensure claude is in /usr/local/bin (npm -g usually puts it there already).
-if command -v claude >/dev/null 2>&1; then
-  CLAUDE_PATH=$(command -v claude)
-  if [ "$CLAUDE_PATH" != "/usr/local/bin/claude" ] && [ ! -x /usr/local/bin/claude ]; then
-    ln -sf "$CLAUDE_PATH" /usr/local/bin/claude
-    echo "linked claude → /usr/local/bin/claude"
-  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -202,6 +180,7 @@ fi
 echo ""
 echo "Tools install complete."
 echo ""
+echo "  task:     $(task --version 2>/dev/null || echo 'not found')"
 echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"

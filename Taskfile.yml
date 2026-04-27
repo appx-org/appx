@@ -1,14 +1,6 @@
 version: "3"
 
 tasks:
-  build:
-    desc: Build frontend and Go binary
-    deps: [web]
-    env:
-      GOCACHE: "{{.ROOT_DIR}}/.go-build-cache"
-    cmds:
-      - go build -o appx ./cmd/appx
-
   web:
     desc: Build frontend and copy to embed directory
     cmds:
@@ -27,11 +19,19 @@ tasks:
     generates:
       - cmd/appx/web/dist/**/*
 
-  dev:
-    desc: Start Vite dev server with hot reload
-    dir: web
+  build:
+    desc: Build frontend and Go binary
+    deps: [web]
+    env:
+      GOCACHE: "{{.ROOT_DIR}}/.go-build-cache"
     cmds:
-      - npm run dev
+      - go build -o appx ./cmd/appx
+
+  local:
+    desc: Build and run appx in HTTP dev mode with sslip.io subdomain routing
+    deps: [build]
+    cmds:
+      - ./appx --http --host 127.0.0.1.sslip.io
 
   test:
     desc: Run all Go tests
@@ -45,6 +45,13 @@ tasks:
     dir: web
     cmds:
       - npm run lint
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -f appx
+      - rm -rf cmd/appx/web/dist
+      - rm -rf web/dist
 
   server:bootstrap:
     desc: First-time server setup — create users/dirs, install tools, build, start services
@@ -66,21 +73,3 @@ tasks:
     desc: Run post-deploy verification suite
     cmds:
       - sudo ./deploy/verify-installation.sh
-
-  run:
-    desc: Run the appx server on port 8443
-    cmds:
-      - ./appx -http -port 8443
-
-  restart:
-    desc: Rebuild frontend + binary then run on port 8443
-    deps: [build]
-    cmds:
-      - task: run
-
-  clean:
-    desc: Remove build artifacts
-    cmds:
-      - rm -f appx
-      - rm -rf cmd/appx/web/dist
-      - rm -rf web/dist

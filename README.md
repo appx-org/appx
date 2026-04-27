@@ -14,7 +14,7 @@ Browser
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
         ├── /api/opencode/* Reverse proxy → OpenCode server
-        └── <project>.localhost  Reverse proxy → agent-built apps
+        └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
 Everything is a single Go binary. The React frontend is compiled and embedded at build time. State lives in a SQLite database on disk.
@@ -28,8 +28,8 @@ OpenCode runs as a **separate process** on `localhost:4096` and handles all AI a
 ## Prerequisites
 
 - Linux host (Ubuntu/Debian, amd64 or arm64)
-- `git` and [Task](https://taskfile.dev) — installed manually before bootstrap (see Initial setup below)
-- Go 1.26+, Node.js 24+, and all agent tools — installed automatically by `task server:bootstrap`
+- `git` — installed manually before bootstrap
+- Go, Node.js, Task, and all agent tools — installed automatically by bootstrap
 
 ## Self-Hosting
 
@@ -59,34 +59,37 @@ EOF
 ### Initial setup
 
 ```bash
-# Install git and Task (the only two prerequisites — everything else is installed by bootstrap)
 sudo apt-get install -y git
-# https://taskfile.dev/docs/installation
-curl -1sLf 'https://dl.cloudsmith.io/public/task/task/setup.deb.sh' | sudo -E bash
-sudo apt-get install -y task
 
-# Use the SSH URL if the repo is private (deploy key must be set up first — see above)
-git clone git@github.com:neuromaxer/appx.git /srv/appx
+# Use the SSH URL if the repo is private (use deploy key)
+git clone https://github.com/neuromaxer/appx.git /srv/appx
 cd /srv/appx
-task server:bootstrap
+sudo ./deploy/bootstrap.sh
 ```
 
 On first run, bootstrap prompts for server configuration:
 
 ```
-Server IP or hostname [auto-detected: 138.x.x.x]:
+Server hostname [138.x.x.x.sslip.io]:
 Data directory [/var/lib/appx]: /mnt/vol/appx-data
 Port [443]:
 ```
 
-Press Enter to accept defaults. The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
+Press Enter to accept defaults. The hostname defaults to `<your-ip>.sslip.io` which provides free wildcard DNS — this enables subdomain routing for agent-built apps (e.g. `https://myapp.138.x.x.x.sslip.io`). You can also use your own domain here.
+
+If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes), mount it first (Volumes -> Show configuration in Hetzner console) and enter the mount path as the data directory.
+
+The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
 Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
+
+During Opencode installation you might be prompted "opencode is installed to /usr/local/bin/opencode and may be managed by a package manager". Select `Install anyways? Yes`
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
 Bootstrap installs these tools system-wide so agents can use them in the terminal or via agent:
 
+- **Task** — [taskfile.dev](https://taskfile.dev) build runner
 - **Go** — compiled from the version in `go.mod`
 - **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
 - **uv** — Python version and package management (self-update: `uv self update`)
@@ -149,25 +152,61 @@ journalctl -u opencode -f      # opencode logs
 
 ## Local development
 
-```bash
-# HTTP mode (no TLS, localhost only)
-./appx --http -port 8080
+OpenCode must be running before starting appx:
 
-# Or with hot-reload frontend
-task dev            # Vite dev server in one terminal
-./appx --http       # appx in another
+```bash
+opencode serve --hostname 127.0.0.1 --port 4096
 ```
+
+Then start appx with `--host 127.0.0.1.sslip.io` so that subdomain routing and session cookies work correctly across project subdomains. Plain `localhost` has inconsistent cookie-sharing behaviour for subdomains across browsers.
+
+```bash
+task local
+```
+
+Access the dashboard at `http://127.0.0.1.sslip.io:8080`. Project subdomains are at `http://<project>.127.0.0.1.sslip.io:8080`.
+
+For any change: edit → `task local` (Ctrl-C the running process first). There is no hot-reload dev server — appx embeds the compiled frontend at build time, so the local dev setup is identical to what runs on the server.
+
+[sslip.io](https://sslip.io) is public DNS — `anything.127.0.0.1.sslip.io` resolves to `127.0.0.1` with no setup required.
 
 ## Persistent storage
 
 All state lives in the data directory (configured during bootstrap, default `/var/lib/appx`):
 
-| Contents                      | Path                       | Access    |
-| ----------------------------- | -------------------------- | --------- |
-| SQLite DB, TLS certs, secrets | `{data}/.appx-internals/`  | appx only |
-| Project directories           | `{data}/projects/`         | shared    |
+| Contents                      | Path                      | Access    |
+| ----------------------------- | ------------------------- | --------- |
+| SQLite DB, TLS certs, secrets | `{data}/.appx-internals/` | appx only |
+| Project directories           | `{data}/projects/`        | shared    |
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
+
+## Subdomain routing without a domain (sslip.io)
+
+Subdomain routing (e.g. `assistum.<base>`) requires a real domain name — bare IPs don't work because `assistum.91.98.144.204` isn't a valid hostname. [sslip.io](https://sslip.io) provides free wildcard DNS: `anything.IP.sslip.io` resolves to the embedded IP automatically.
+
+Edit `/etc/appx/appx.env` and set `APPX_HOST` to the sslip.io hostname:
+
+```bash
+APPX_HOST=91.98.144.204.sslip.io
+```
+
+Delete old TLS certs so they regenerate with the wildcard SAN, then restart:
+
+```bash
+sudo rm /var/lib/appx/.appx-internals/{cert,key}.pem
+sudo systemctl restart appx
+```
+
+This gives you:
+
+- `https://91.98.144.204.sslip.io` — dashboard
+- `https://assistum.91.98.144.204.sslip.io` — project subdomain
+- Session cookie shared across all subdomains via `Domain=.91.98.144.204.sslip.io`
+
+Note: the bare IP (`https://91.98.144.204`) will stop serving the dashboard. Access via the sslip.io hostname instead.
+
+See [docs/security/certificate_and_sslip.md](docs/security/certificate_and_sslip.md) for the full analysis of certificate generation, cookie scoping, and browser behaviour.
 
 ## Automatic TLS via Let's Encrypt
 
@@ -202,8 +241,7 @@ Directory permissions prevent OpenCode (and any agent it spawns) from accessing 
 ## Development
 
 ```bash
-task build          # Build frontend + Go binary → ./appx
-task dev            # Vite dev server (hot reload)
+task local          # Build and run appx in HTTP dev mode (127.0.0.1.sslip.io)
 task test           # Run all Go tests
 task server:bootstrap   # First-time server setup
 task server:deploy      # Pull, build, install, restart
