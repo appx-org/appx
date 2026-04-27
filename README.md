@@ -129,14 +129,23 @@ journalctl -u opencode -f      # opencode logs
 
 ## Local development
 
-```bash
-# HTTP mode (no TLS, localhost only)
-./appx --http -port 8080
+OpenCode must be running before starting appx:
 
-# Or with hot-reload frontend
-task dev            # Vite dev server in one terminal
-./appx --http       # appx in another
+```bash
+opencode serve --hostname 127.0.0.1 --port 4096
 ```
+
+Then start appx with `--host 127.0.0.1.sslip.io` so that subdomain routing and session cookies work correctly across project subdomains. Plain `localhost` has inconsistent cookie-sharing behaviour for subdomains across browsers.
+
+```bash
+task local
+```
+
+Access the dashboard at `http://127.0.0.1.sslip.io:8080`. Project subdomains are at `http://<project>.127.0.0.1.sslip.io:8080`.
+
+For any change: edit → `task local` (Ctrl-C the running process first). There is no hot-reload dev server — appx embeds the compiled frontend at build time, so the local dev setup is identical to what runs on the server.
+
+[sslip.io](https://sslip.io) is public DNS — `anything.127.0.0.1.sslip.io` resolves to `127.0.0.1` with no setup required.
 
 ## Persistent storage
 
@@ -209,8 +218,7 @@ Directory permissions prevent OpenCode (and any agent it spawns) from accessing 
 ## Development
 
 ```bash
-task build          # Build frontend + Go binary → ./appx
-task dev            # Vite dev server (hot reload)
+task local          # Build and run appx in HTTP dev mode (127.0.0.1.sslip.io)
 task test           # Run all Go tests
 task server:bootstrap   # First-time server setup
 task server:deploy      # Pull, build, install, restart

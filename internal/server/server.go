@@ -178,8 +178,7 @@ func runHTTP(cfg Config, handler http.Handler) error {
 		IdleTimeout:       90 * time.Second,
 	}
 
-	log.Printf("WARNING: running in HTTP mode -- for local development only")
-	log.Printf("Appx running on http://localhost:%d", cfg.Port)
+
 
 	return serveHTTP(srv, cfg.Port)
 }
