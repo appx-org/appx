@@ -96,6 +96,29 @@ func TestManagerCreate_CreatesDirectory(t *testing.T) {
 		t.Errorf("AGENTS.md missing project name, content: %s", content)
 	}
 
+	// Pi harness exists with prompt, settings, first-party extension, and skill helper.
+	piAgentsPath := filepath.Join(projectDir, ".pi", "AGENTS.md")
+	piAgents, err := os.ReadFile(piAgentsPath)
+	if err != nil {
+		t.Fatalf(".pi/AGENTS.md not created: %v", err)
+	}
+	if !strings.Contains(string(piAgents), "10000") {
+		t.Errorf(".pi/AGENTS.md missing port number, content: %s", piAgents)
+	}
+	if !strings.Contains(string(piAgents), "my-app") {
+		t.Errorf(".pi/AGENTS.md missing project name, content: %s", piAgents)
+	}
+	for _, path := range []string{
+		filepath.Join(projectDir, ".pi", "settings.json"),
+		filepath.Join(projectDir, ".pi", "extensions", "appx-guardrails.ts"),
+		filepath.Join(projectDir, ".pi", "skills", "appx-egress", "SKILL.md"),
+		filepath.Join(projectDir, ".pi", "skills", "appx-egress", "request_egress.py"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("Pi harness file not created: %s: %v", path, err)
+		}
+	}
+
 	// Project has correct assigned port
 	if p.AssignedPort != 10000 {
 		t.Errorf("expected port 10000, got %d", p.AssignedPort)
@@ -205,6 +228,15 @@ func TestManagerCreate_AGENTSmdUsesBaseDomain(t *testing.T) {
 	}
 	if strings.Contains(string(content), ".localhost") {
 		t.Errorf("expected AGENTS.md to NOT contain '.localhost' when baseDomain is set, got:\n%s", content)
+	}
+
+	piAgentsPath := filepath.Join(mgr.ProjectRoot, "my-app", ".pi", "AGENTS.md")
+	piContent, err := os.ReadFile(piAgentsPath)
+	if err != nil {
+		t.Fatalf(".pi/AGENTS.md not created: %v", err)
+	}
+	if !strings.Contains(string(piContent), "my-app.user.appx.app") {
+		t.Errorf("expected .pi/AGENTS.md to contain 'my-app.user.appx.app', got:\n%s", piContent)
 	}
 }
 

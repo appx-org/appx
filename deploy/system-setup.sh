@@ -127,6 +127,15 @@ else
   echo "agents rules already exist: $OC_AGENTS_FILE"
 fi
 
+# Pi agent config/auth/cache dir. Pi is project-local for prompts, skills, and
+# extensions, but auth/models/settings that should not live in project repos go
+# under the agent user's private home directory.
+PI_AGENT_DIR="/home/opencode/.pi/agent"
+install -d -o opencode -g opencode -m 700 "$PI_AGENT_DIR"
+install -d -o opencode -g opencode -m 700 "$PI_AGENT_DIR/npm"
+install -d -o opencode -g opencode -m 700 "$PI_AGENT_DIR/git"
+echo "directory ready: $PI_AGENT_DIR (opencode:opencode 700)"
+
 # ---------------------------------------------------------------------------
 # Appx binary permissions (if binary already deployed)
 # ---------------------------------------------------------------------------

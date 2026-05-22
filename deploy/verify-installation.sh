@@ -119,6 +119,9 @@ expect_ok "opencode config sets anthropic model" \
   grep -q '"anthropic/' /home/opencode/.config/opencode/opencode.json
 expect_ok "opencode AGENTS.md exists" \
   test -f /home/opencode/.config/opencode/AGENTS.md
+expect_ok "pi agent dir exists"     test -d /home/opencode/.pi/agent
+expect_eq "pi agent dir is opencode:opencode 700" \
+  "$(stat -c '%U:%G %a' /home/opencode/.pi/agent 2>/dev/null)" "opencode:opencode 700"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -187,6 +190,7 @@ ACTUAL_NODE_MAJOR=$(/usr/local/bin/node --version 2>/dev/null | sed 's/^v//' | c
 expect_eq "node major version is $EXPECTED_NODE_MAJOR" \
   "$ACTUAL_NODE_MAJOR" "$EXPECTED_NODE_MAJOR"
 expect_ok "opencode binary in /usr/local/bin" test -x /usr/local/bin/opencode
+expect_ok "pi binary in /usr/local/bin"       test -x /usr/local/bin/pi
 expect_ok "uv binary in /usr/local/bin"       test -x /usr/local/bin/uv
 
 EXPECTED_OC_VERSION=""
@@ -198,6 +202,16 @@ if [ -n "$EXPECTED_OC_VERSION" ]; then
   ACTUAL_OC_VERSION=$(/usr/local/bin/opencode --version 2>/dev/null || echo "unknown")
   expect_eq "opencode version matches deploy/opencode-version" \
     "$ACTUAL_OC_VERSION" "$EXPECTED_OC_VERSION"
+fi
+
+EXPECTED_PI_VERSION=""
+if [ -f "$SCRIPT_DIR/pi-version" ]; then
+  EXPECTED_PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
+fi
+if [ -n "$EXPECTED_PI_VERSION" ]; then
+  ACTUAL_PI_VERSION=$(/usr/local/bin/pi --version 2>/dev/null || echo "unknown")
+  expect_eq "pi version matches deploy/pi-version" \
+    "$ACTUAL_PI_VERSION" "$EXPECTED_PI_VERSION"
 fi
 
 # Claude is optional (requires Node.js) — report status without failing.

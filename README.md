@@ -81,7 +81,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Pi, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
 
 During Opencode installation you might be prompted "opencode is installed to /usr/local/bin/opencode and may be managed by a package manager". Select `Install anyways? Yes`
 
@@ -94,6 +94,7 @@ Bootstrap installs these tools system-wide so agents can use them in the termina
 - **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
 - **uv** — Python version and package management (self-update: `uv self update`)
 - **OpenCode** — AI agent backend (pinned version in `deploy/opencode-version`)
+- **Pi** — AI coding agent CLI/SDK for the Pi migration path (pinned version in `deploy/pi-version`)
 - **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
 
 ### Updating appx
@@ -105,11 +106,20 @@ cd /srv/appx
 task server:deploy
 ```
 
-Pulls latest code, rebuilds, installs the binary, updates OpenCode to the pinned version, and restarts both services.
+Pulls latest code, rebuilds, installs the binary, updates OpenCode and Pi to the pinned versions, and restarts both services.
 
 ### Updating OpenCode version
 
 Edit `deploy/opencode-version` to the new version, then:
+
+```bash
+cd /srv/appx
+task server:deploy
+```
+
+### Updating Pi version
+
+Edit `deploy/pi-version` to the new version, then:
 
 ```bash
 cd /srv/appx
@@ -144,10 +154,11 @@ journalctl -u opencode -f      # opencode logs
 | File / Script                   | When             | What                                                       |
 | ------------------------------- | ---------------- | ---------------------------------------------------------- |
 | `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
-| `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, opencode config |
-| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, OpenCode (pinned), Claude Code, uv         |
+| `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, agent config    |
+| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, OpenCode, Pi, Claude Code, uv              |
 | `deploy/opencode.json`          | Model changes    | Default OpenCode model config (copied to opencode home)    |
 | `deploy/opencode-version`       | Version pin      | Pinned OpenCode version installed by tools-install         |
+| `deploy/pi-version`             | Version pin      | Pinned Pi version installed by tools-install               |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
 
 ## Local development
@@ -178,6 +189,12 @@ All state lives in the data directory (configured during bootstrap, default `/va
 | ----------------------------- | ------------------------- | --------- |
 | SQLite DB, TLS certs, secrets | `{data}/.appx-internals/` | appx only |
 | Project directories           | `{data}/projects/`        | shared    |
+
+Each new project is scaffolded with a project-local Pi harness under
+`{data}/projects/<name>/.pi/`: an Appx-specific prompt, first-party guardrail
+extension, egress skill helper, and `settings.json` for reviewed/pinned Pi
+packages. Third-party Pi packages are not installed by default because they run
+inside the agent process.
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 
@@ -232,11 +249,11 @@ Bootstrap creates two OS users with a shared `projects` group:
 
 ```
 appx      — runs the appx server, owns DB and TLS certs
-opencode  — runs OpenCode, cannot access appx data
+opencode  — runs OpenCode and Pi agent tooling, cannot access appx data
 projects  — shared group, both users read/write project directories
 ```
 
-Directory permissions prevent OpenCode (and any agent it spawns) from accessing the appx database, TLS keys, or binary. Project directories use setgid so files created by either user are accessible to both.
+Directory permissions prevent agent tooling from accessing the appx database, TLS keys, or binary. Project directories use setgid so files created by either user are accessible to both.
 
 ## Development
 

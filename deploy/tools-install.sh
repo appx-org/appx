@@ -8,7 +8,8 @@
 #   - Go         (version pinned to go.mod — build tool)
 #   - Task        (taskfile.dev build runner — build tool)
 #   - Node.js 24  (via nvm, pinned to major version — runtime + agents)
-#   - OpenCode    (AI agent backend, version pinned to deploy/opencode-version)
+#   - OpenCode    (legacy AI agent backend, version pinned to deploy/opencode-version)
+#   - Pi          (AI coding agent CLI/SDK, version pinned to deploy/pi-version)
 #   - Claude Code (Claude CLI for terminal use — self-update: npm update -g @anthropic-ai/claude-code)
 #   - uv          (Python version/package manager — self-update: uv self update)
 #
@@ -140,6 +141,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Pi coding agent (installed via npm, pinned to deploy/pi-version)
+# ---------------------------------------------------------------------------
+
+PI_VERSION=""
+if [ -f "$SCRIPT_DIR/pi-version" ]; then
+  PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
+fi
+
+CURRENT_PI=$(/usr/local/bin/pi --version 2>/dev/null || echo "")
+
+if [ -n "$PI_VERSION" ] && [ "$CURRENT_PI" = "$PI_VERSION" ]; then
+  echo "pi already at $PI_VERSION"
+else
+  echo "installing pi${PI_VERSION:+ $PI_VERSION} via npm..."
+  npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION:-latest}"
+  ln -sf "$NODE_BIN_DIR/pi" /usr/local/bin/pi
+  echo "pi installed: $(/usr/local/bin/pi --version 2>/dev/null)"
+fi
+
+# ---------------------------------------------------------------------------
 # Claude Code (self-update: sudo npm update -g @anthropic-ai/claude-code)
 # ---------------------------------------------------------------------------
 
@@ -185,4 +206,5 @@ echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"
 echo "  opencode: $(/usr/local/bin/opencode --version 2>/dev/null || echo 'not found')"
+echo "  pi:       $(/usr/local/bin/pi --version 2>/dev/null || echo 'not found')"
 echo "  claude:   $(claude --version 2>/dev/null || echo 'not found')"

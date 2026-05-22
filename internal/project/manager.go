@@ -8,8 +8,10 @@ import (
 	"strings"
 )
 
-// agentsTemplate is the AGENTS.md content scaffolded into every new project
-// directory. Placeholders {{name}}, {{port}}, {{subdomain}} are replaced at creation.
+// agentsTemplate is the root AGENTS.md content scaffolded into every new
+// project directory for the legacy OpenCode runtime. The Pi runtime reads the
+// richer project-local harness at .pi/AGENTS.md; keep this root file small and
+// compatible with both runtimes.
 const agentsTemplate = `# Project: {{name}}
 
 ## App Port
@@ -23,6 +25,7 @@ Your app will be accessible at {{subdomain}}.
 - Use this port for ALL dev servers (Vite, Next.js, Express, etc.)
 - Do not change the port — it is mapped to a subdomain by the appx proxy
 - The project directory is the working directory for all commands
+- Pi-specific prompt, skill, and extension assets are in .pi/
 `
 
 // Manager provides project lifecycle operations. It delegates to the Store for
@@ -127,6 +130,10 @@ func (m *Manager) scaffoldProject(dir string, proj *Project) error {
 	agentsPath := filepath.Join(dir, "AGENTS.md")
 	if err := os.WriteFile(agentsPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write AGENTS.md: %w", err)
+	}
+
+	if err := scaffoldPiHarness(dir, proj, domain); err != nil {
+		return fmt.Errorf("write .pi harness: %w", err)
 	}
 
 	if err := runGit(dir, "init"); err != nil {
