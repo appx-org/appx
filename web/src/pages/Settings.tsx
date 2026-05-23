@@ -100,6 +100,31 @@ function isFlowTerminal(flow?: AgentOAuthFlowState | null) {
   return Boolean(flow && ['complete', 'error', 'cancelled'].includes(flow.status));
 }
 
+function flowStatusLabel(status: AgentOAuthFlowState['status']) {
+  switch (status) {
+    case 'starting':
+      return 'Starting';
+    case 'prompt':
+      return 'Input needed';
+    case 'auth':
+    case 'waiting':
+      return 'Waiting';
+    case 'complete':
+      return 'Connected';
+    case 'error':
+      return 'Error';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+}
+
+function flowStatusStyle(status: AgentOAuthFlowState['status']): CSSProperties {
+  if (status === 'complete') return { color: 'var(--green)', borderColor: 'rgba(61, 220, 132, 0.35)' };
+  if (status === 'error' || status === 'cancelled') return { color: 'var(--red)', borderColor: 'rgba(255, 107, 107, 0.35)' };
+  if (status === 'prompt') return { color: 'var(--yellow)', borderColor: 'rgba(245, 197, 24, 0.35)' };
+  return { color: 'var(--cyan)', borderColor: 'rgba(0, 229, 255, 0.35)' };
+}
+
 function thinkingMap(form: CustomForm) {
   if (!form.reasoning || form.thinkingPreset === 'none') return undefined;
   if (form.thinkingPreset === 'deepseek') {
@@ -200,6 +225,7 @@ export default function Settings() {
   const selectedSupportsKey = selected?.supportsApiKey ?? false;
   const selectedSupportsSubscription = selected?.supportsSubscription ?? false;
   const canRemoveSelected = selected?.source === 'stored' || selected?.credentialType === 'oauth';
+  const subscriptionActive = Boolean(subscriptionFlow && !isFlowTerminal(subscriptionFlow));
 
   const clearMessages = () => {
     setError('');
@@ -587,9 +613,9 @@ export default function Settings() {
                   data-btn="outline-green"
                   style={styles.outlineBtn}
                   onClick={handleStartSubscription}
-                  disabled={!selectedSupportsSubscription || subscriptionBusy || !selectedProvider}
+                  disabled={!selectedSupportsSubscription || subscriptionBusy || subscriptionActive || !selectedProvider}
                 >
-                  {subscriptionBusy ? 'Working...' : 'Subscription Login'}
+                  {subscriptionBusy ? 'Working...' : subscriptionActive ? 'Login in progress' : 'Subscription Login'}
                 </button>
                 {canRemoveSelected && (
                   <button
@@ -606,8 +632,13 @@ export default function Settings() {
               {subscriptionFlow && (
                 <div style={styles.flowPanel}>
                   <div style={styles.flowHeader}>
-                    <span style={styles.statusLabel}>{subscriptionFlow.providerName}</span>
-                    <span style={styles.statusMuted}>{subscriptionFlow.status}</span>
+                    <div style={styles.flowTitleGroup}>
+                      <span style={styles.statusLabel}>Browser login</span>
+                      <span style={styles.flowProviderName}>{subscriptionFlow.providerName}</span>
+                    </div>
+                    <span style={{ ...styles.flowStatusPill, ...flowStatusStyle(subscriptionFlow.status) }}>
+                      {flowStatusLabel(subscriptionFlow.status)}
+                    </span>
                   </div>
                   {subscriptionFlow.authUrl && (
                     <div style={styles.loginRow}>
@@ -629,16 +660,6 @@ export default function Settings() {
                   {subscriptionFlow.progress.length > 0 && (
                     <div style={styles.progressText}>{subscriptionFlow.progress.at(-1)}</div>
                   )}
-                  {subscriptionCanUseFallback && !subscriptionFallbackOpen && (
-                    <button
-                      data-btn="text"
-                      type="button"
-                      style={styles.fallbackBtn}
-                      onClick={() => setSubscriptionFallbackOpen(true)}
-                    >
-                      Use manual fallback
-                    </button>
-                  )}
                   {subscriptionNeedsInput && (
                     <div style={styles.flowInputRow}>
                       <input
@@ -659,14 +680,27 @@ export default function Settings() {
                     </div>
                   )}
                   {!isFlowTerminal(subscriptionFlow) && (
-                    <button
-                      data-btn="text-red"
-                      style={styles.removeBtn}
-                      onClick={handleCancelSubscription}
-                      disabled={subscriptionBusy}
-                    >
-                      Cancel login
-                    </button>
+                    <div style={styles.flowActions}>
+                      {subscriptionCanUseFallback && !subscriptionFallbackOpen && (
+                        <button
+                          data-btn="text"
+                          type="button"
+                          style={styles.fallbackBtn}
+                          onClick={() => setSubscriptionFallbackOpen(true)}
+                        >
+                          Use manual fallback
+                        </button>
+                      )}
+                      <button
+                        data-btn="text-red"
+                        type="button"
+                        style={styles.flowCancelBtn}
+                        onClick={handleCancelSubscription}
+                        disabled={subscriptionBusy}
+                      >
+                        Cancel login
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
@@ -1213,22 +1247,46 @@ const styles: Record<string, CSSProperties> = {
   flowPanel: {
     borderTop: '1px solid var(--border)',
     borderBottom: '1px solid var(--border)',
-    padding: '12px 0',
-    marginTop: 12,
+    padding: '16px 0',
+    margin: '16px 0 18px',
   },
   flowHeader: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  flowTitleGroup: {
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  flowProviderName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'var(--text)',
+    fontSize: 13,
+    fontWeight: 500,
+  },
+  flowStatusPill: {
+    border: '1px solid',
+    borderRadius: 999,
+    padding: '3px 8px',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    lineHeight: 1.2,
+    whiteSpace: 'nowrap',
   },
   loginRow: {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
     flexWrap: 'wrap',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   loginLink: {
     background: 'var(--blue)',
@@ -1265,7 +1323,22 @@ const styles: Record<string, CSSProperties> = {
     background: 'transparent',
     border: 'none',
     color: 'var(--cyan)',
-    padding: '2px 0 10px',
+    padding: 0,
+    fontSize: 12,
+    cursor: 'pointer',
+  },
+  flowActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 16,
+    flexWrap: 'wrap',
+    marginTop: 10,
+  },
+  flowCancelBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--red)',
+    padding: 0,
     fontSize: 12,
     cursor: 'pointer',
   },
@@ -1273,7 +1346,7 @@ const styles: Record<string, CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 1fr) auto',
     gap: 8,
-    marginBottom: 10,
+    marginTop: 10,
   },
   section: {
     borderTop: '1px solid var(--border)',
