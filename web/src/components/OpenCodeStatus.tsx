@@ -9,22 +9,38 @@ export default function OpenCodeStatus({ backend = 'opencode' }: { backend?: 'op
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+
     if (backend === 'pi') {
       setHealthy(true);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     const check = () => {
       getOpenCodeHealth()
-        .then(res => setHealthy(res.healthy))
-        .catch(() => setHealthy(false));
+        .then(res => {
+          if (!cancelled) setHealthy(res.healthy);
+        })
+        .catch(() => {
+          if (!cancelled) setHealthy(false);
+        });
     };
 
     check();
     pollRef.current = setInterval(check, POLL_INTERVAL);
 
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      cancelled = true;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
   }, [backend]);
 
