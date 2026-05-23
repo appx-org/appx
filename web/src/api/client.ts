@@ -107,6 +107,35 @@ export function deleteApiKey() {
   return request<{ status: string }>('/settings/api-key', { method: 'DELETE' });
 }
 
+export interface AgentAuthProvider {
+  provider: string;
+  configured: boolean;
+  source?: 'stored' | 'runtime' | 'environment' | 'fallback' | 'models_json_key' | 'models_json_command';
+  label?: string;
+  modelCount: number;
+  availableModelCount: number;
+}
+
+/** Fetches Pi provider auth status. No secret values are returned. */
+export function getAgentAuthProviders() {
+  return request<{ providers: AgentAuthProvider[] }>('/agent/auth/providers');
+}
+
+/** Stores an API key for a Pi provider in the agent runtime user's auth storage. */
+export function setAgentProviderApiKey(provider: string, key: string) {
+  return request<{ ok: true }>(`/agent/auth/providers/${encodeURIComponent(provider)}/api-key`, {
+    method: 'PUT',
+    body: JSON.stringify({ key }),
+  });
+}
+
+/** Removes a stored Pi provider credential from the agent runtime user's auth storage. */
+export function deleteAgentProviderCredential(provider: string) {
+  return request<{ ok: true }>(`/agent/auth/providers/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+  });
+}
+
 /** OpenCode server health status. */
 export interface OpenCodeHealth {
   healthy: boolean;

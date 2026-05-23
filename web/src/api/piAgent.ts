@@ -5,6 +5,29 @@ export type PiSessionInfo = {
   messageCount: number;
 };
 
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+export type PiAgentModel = {
+  provider: string;
+  id: string;
+  name: string;
+  api: string;
+  reasoning: boolean;
+  available: boolean;
+  input: Array<'text' | 'image'>;
+  contextWindow: number;
+  maxTokens: number;
+  defaultThinkingLevel?: ThinkingLevel;
+};
+
+export type PiSessionModelSettings = {
+  model: PiAgentModel | null;
+  thinkingLevel: ThinkingLevel;
+  availableThinkingLevels: ThinkingLevel[];
+  supportsThinking: boolean;
+  isStreaming: boolean;
+};
+
 function agentBase(projectId: string) {
   return `/api/projects/${encodeURIComponent(projectId)}/agent`;
 }
@@ -58,9 +81,33 @@ export function createPiSession(projectId: string) {
   });
 }
 
+export function listPiModels(projectId: string) {
+  return request<{ models: PiAgentModel[] }>(`${agentBase(projectId)}/sessions/models`);
+}
+
 export function getPiSessionMessages(projectId: string, sessionId: string) {
   return request<{ id: string; messages: unknown[] }>(
     `${agentBase(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
+  );
+}
+
+export function getPiSessionSettings(projectId: string, sessionId: string) {
+  return request<PiSessionModelSettings>(
+    `${agentBase(projectId)}/sessions/${encodeURIComponent(sessionId)}/settings`,
+  );
+}
+
+export function updatePiSessionSettings(
+  projectId: string,
+  sessionId: string,
+  body: { provider?: string; modelId?: string; thinkingLevel?: ThinkingLevel },
+) {
+  return request<PiSessionModelSettings>(
+    `${agentBase(projectId)}/sessions/${encodeURIComponent(sessionId)}/settings`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
   );
 }
 

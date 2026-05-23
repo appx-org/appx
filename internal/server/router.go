@@ -72,6 +72,10 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 		if agentServerURL == "" {
 			agentServerURL = "http://127.0.0.1:4001"
 		}
+		agentGlobalProxy := agentServerGlobalProxyHandler(agentServerURL, rcfg.AgentServerToken)
+		api.Handle("GET /api/agent/{agentPath...}", agentGlobalProxy)
+		api.Handle("PUT /api/agent/{agentPath...}", agentGlobalProxy)
+		api.Handle("DELETE /api/agent/{agentPath...}", agentGlobalProxy)
 		agentProxy := agentServerProxyHandler(pm, agentServerURL, rcfg.AgentServerToken)
 		api.Handle("GET /api/projects/{id}/agent/{agentPath...}", agentProxy)
 		api.Handle("POST /api/projects/{id}/agent/{agentPath...}", agentProxy)

@@ -1066,6 +1066,53 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 	}
 }
 
+func TestAgentServerGlobalProxy_Authed_ForwardsAuthRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":          r.URL.Path,
+			"method":        r.Method,
+			"cookie":        r.Header.Get("Cookie"),
+			"authorization": r.Header.Get("Authorization"),
+		})
+	}))
+	defer backend.Close()
+
+	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "secret-token")
+
+	req := authedRequest(t, store, "GET", "/api/agent/auth/providers", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "/v1/auth/providers" {
+		t.Errorf("expected path /v1/auth/providers after prefix strip, got %q", resp["path"])
+	}
+	if resp["cookie"] != "" {
+		t.Errorf("expected appx cookie to be stripped, got %q", resp["cookie"])
+	}
+	if resp["authorization"] != "Bearer secret-token" {
+		t.Errorf("expected bearer token forwarded, got %q", resp["authorization"])
+	}
+}
+
+func TestAgentServerGlobalProxy_RequiresAuth(t *testing.T) {
+	handler, _, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+
+	req := httptest.NewRequest("GET", "/api/agent/auth/providers", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
 func TestAgentServerProxy_StripsCookieAndAddsBearer(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
