@@ -200,6 +200,12 @@ API keys or Pi subscription auth where the provider supports it, and custom
 providers such as LiteLLM are written to the agent service user's
 `models.json` without exposing secret values back to the browser.
 
+The Agent tab consumes Appx's project-scoped `/api/projects/{id}/agent/*`
+proxy, not provider-specific OpenAI or Anthropic streams. `agent-server` turns
+all supported Pi providers into the same session HTTP/SSE contract, so frontend
+streaming code should handle Pi `message_update` events by `contentIndex` for
+text and tool-call blocks.
+
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 
 ## Subdomain routing without a domain (sslip.io)
