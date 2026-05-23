@@ -325,7 +325,11 @@ function isBlockingExtensionRequest(request: ExtensionUiRequest): boolean {
 }
 
 function mergeExtensionRequests(state: SessionState, requests: ExtensionUiRequest[]): SessionState {
-  let next = state;
+  const activeIds = new Set(requests.filter(isBlockingExtensionRequest).map((request) => request.id));
+  let next = {
+    ...state,
+    extensionRequests: state.extensionRequests.filter((request) => activeIds.has(request.id)),
+  };
   for (const request of requests) next = reduceExtensionUiRequest(next, request);
   return next;
 }

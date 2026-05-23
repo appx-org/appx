@@ -173,6 +173,9 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
 else
   systemctl disable --now opencode 2>/dev/null || true
   rm -f /etc/systemd/system/opencode.service
+  if ! systemctl is-active --quiet agent-server 2>/dev/null; then
+    pkill -u opencode -f '(^|/)agent-server( |$)|agent-server/dist/server\.js' 2>/dev/null || true
+  fi
   sed "s|__APPX_PROJECTS_DIR__|$DATA_DIR/projects|g" \
     "$SCRIPT_DIR/agent-server.service" > /etc/systemd/system/agent-server.service
   echo "copied appx.service and agent-server.service; opencode.service disabled for $APPX_AGENT_BACKEND backend"

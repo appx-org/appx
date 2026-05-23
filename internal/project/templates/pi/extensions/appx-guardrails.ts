@@ -61,11 +61,7 @@ export default function appxGuardrails(pi: ExtensionAPI) {
 				return { block: true, reason: `Blocked ${risk} command because no UI approval channel is available.` };
 			}
 
-			const ok = await ctx.ui.confirm(
-				"Approve command?",
-				`${risk}\n\n${command}`,
-				{ timeout: 60_000 },
-			);
+			const ok = await ctx.ui.confirm("Approve command?", `${risk}\n\n${command}`);
 			if (!ok) return { block: true, reason: `Blocked ${risk} command by user decision.` };
 			return undefined;
 		}

@@ -1,5 +1,6 @@
 import {
   abortPiSession,
+  getPiSessionSettings,
   getPiSessionMessages,
   listPiExtensionUiRequests,
   piEventsUrl,
@@ -19,6 +20,9 @@ import {
 type Entry = {
   state: SessionState;
   es: EventSource;
+  poll?: number;
+  pollBusy?: boolean;
+  lastPromptAt?: number;
 };
 
 const entries = new Map<string, Entry>();
@@ -43,6 +47,43 @@ function dispatch(entryKey: string, action: SessionAction): void {
   emit(entryKey);
 }
 
+function hasUnsettledUi(state: SessionState): boolean {
+  return state.messages.some((message) =>
+    message.streaming ||
+    message.parts.some((part) => part.type === 'tool' && part.status !== 'done' && part.status !== 'error'),
+  );
+}
+
+async function refreshExtensionRequests(projectId: string, sessionId: string, entryKey: string): Promise<void> {
+  const entry = entries.get(entryKey);
+  if (!entry || entry.pollBusy) return;
+  if (entry.state.status === 'idle' && entry.state.extensionRequests.length === 0) return;
+
+  entry.pollBusy = true;
+  try {
+    const pending = await listPiExtensionUiRequests(projectId, sessionId);
+    const requests = pending.requests as ExtensionUiRequest[];
+    if (requests.length > 0 || entry.state.extensionRequests.length > 0) {
+      dispatch(entryKey, { type: 'load_extension_requests', requests });
+    }
+
+    const current = entries.get(entryKey);
+    if (!current || current.state.status === 'idle' || !hasUnsettledUi(current.state)) return;
+    if (current.lastPromptAt && Date.now() - current.lastPromptAt < 3_000) return;
+
+    const settings = await getPiSessionSettings(projectId, sessionId);
+    if (!settings.isStreaming) {
+      const history = await getPiSessionMessages(projectId, sessionId);
+      dispatch(entryKey, { type: 'load_history', messages: history.messages as AgentMessage[] });
+    }
+  } catch {
+    // SSE remains the primary channel; polling is only a recovery path.
+  } finally {
+    const latest = entries.get(entryKey);
+    if (latest) latest.pollBusy = false;
+  }
+}
+
 export function attach(projectId: string, sessionId: string): SessionState {
   const entryKey = key(projectId, sessionId);
   const existing = entries.get(entryKey);
@@ -50,7 +91,11 @@ export function attach(projectId: string, sessionId: string): SessionState {
 
   const es = new EventSource(piEventsUrl(projectId, sessionId));
   const initial: SessionState = { ...initialSessionState, sessionId };
-  entries.set(entryKey, { state: initial, es });
+  const entry: Entry = { state: initial, es };
+  entries.set(entryKey, entry);
+  entry.poll = window.setInterval(() => {
+    void refreshExtensionRequests(projectId, sessionId, entryKey);
+  }, 1_500);
 
   es.onopen = () => dispatch(entryKey, { type: 'set_connected', connected: true });
   es.onerror = () => dispatch(entryKey, { type: 'set_connected', connected: false });
@@ -105,9 +150,12 @@ export function getSnapshot(projectId: string, sessionId: string): SessionState 
 
 export async function sendPrompt(projectId: string, sessionId: string, text: string): Promise<void> {
   const entryKey = key(projectId, sessionId);
+  const entry = entries.get(entryKey);
+  if (entry) entry.lastPromptAt = Date.now();
   dispatch(entryKey, { type: 'user_prompt_submitted', text });
   try {
     await sendPiPrompt(projectId, sessionId, text);
+    void refreshExtensionRequests(projectId, sessionId, entryKey);
   } catch (err) {
     dispatch(entryKey, { type: 'set_error', error: err instanceof Error ? err.message : String(err) });
     dispatch(entryKey, { type: 'agent_event', event: { type: 'agent_end', messages: [] } });
@@ -134,6 +182,7 @@ export function detach(projectId: string, sessionId: string): void {
   const entry = entries.get(entryKey);
   if (!entry) return;
   entry.es.close();
+  if (entry.poll) window.clearInterval(entry.poll);
   entries.delete(entryKey);
   listeners.delete(entryKey);
 }
