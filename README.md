@@ -81,7 +81,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite.
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite. In Pi mode the Appx UI proxies project agent requests to `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`), where the separate `agent-server` repo runs the Pi SDK session API.
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
@@ -92,6 +92,7 @@ Bootstrap installs these tools system-wide so agents can use them in the termina
 - **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
 - **uv** — Python version and package management (self-update: `uv self update`)
 - **Pi** — AI coding agent CLI/SDK (pinned version in `deploy/pi-version`)
+- **agent-server** — separate Appx org service that exposes Pi sessions over HTTP/SSE for the Agent tab
 - **OpenCode** — optional legacy AI agent backend when `APPX_AGENT_BACKEND=opencode` (pinned version in `deploy/opencode-version`)
 - **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
 

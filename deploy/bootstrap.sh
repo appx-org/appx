@@ -83,12 +83,14 @@ else
 #     APPX_PORT=443
 #     APPX_DOMAIN=app.example.com
 #     CLOUDFLARE_API_TOKEN=your_token_here
+#     APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 #
 # All variables:
 #   APPX_HOST   — server hostname for TLS cert and routing (default: <ip>.sslip.io)
 #   APPX_DATA   — data directory: DB, TLS certs, projects (default: /var/lib/appx)
 #   APPX_PORT   — listen port (default: 443). MUST be open in firewall
 #   APPX_AGENT_BACKEND — agent backend: pi or opencode (default: pi)
+#   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
 #   CLOUDFLARE_API_TOKEN — Cloudflare API token for DNS-01 challenge (optional)
 
@@ -96,6 +98,7 @@ APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
 APPX_PORT=$APPX_PORT
 APPX_AGENT_BACKEND=pi
+APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 # APPX_DOMAIN=
 # CLOUDFLARE_API_TOKEN=
 EOF

@@ -28,23 +28,25 @@ import (
 // Config holds all dependencies needed to start the HTTPS server.
 // It is constructed in main() and passed to Run().
 type Config struct {
-	Port            int
-	InternalsDir    string // path to .appx-internals (DB, TLS certs)
-	DB              *sql.DB
-	AuthStore       *auth.Store
-	ProjectManager  *project.Manager
-	WebFS           fs.FS
-	TLSHosts        []string
-	Domain          string
-	CloudflareToken string
-	HTTPMode        bool     // true = plain HTTP, locked to localhost
-	BaseDomain      string   // "localhost" in HTTP mode, Domain value in production
-	HostAliases     []string // additional hosts that serve the dashboard (e.g. server IP or hostname)
-	AgentBackend    string
-	OpenCodeClient  *opencode.Client
-	EgressStore     *egress.Store
-	EgressPending   *egress.PendingRegistry
-	LocalManager    *terminal.LocalManager
+	Port             int
+	InternalsDir     string // path to .appx-internals (DB, TLS certs)
+	DB               *sql.DB
+	AuthStore        *auth.Store
+	ProjectManager   *project.Manager
+	WebFS            fs.FS
+	TLSHosts         []string
+	Domain           string
+	CloudflareToken  string
+	HTTPMode         bool     // true = plain HTTP, locked to localhost
+	BaseDomain       string   // "localhost" in HTTP mode, Domain value in production
+	HostAliases      []string // additional hosts that serve the dashboard (e.g. server IP or hostname)
+	AgentBackend     string
+	AgentServerURL   string
+	AgentServerToken string
+	OpenCodeClient   *opencode.Client
+	EgressStore      *egress.Store
+	EgressPending    *egress.PendingRegistry
+	LocalManager     *terminal.LocalManager
 }
 
 // Run starts the HTTPS server and blocks until it receives SIGINT/SIGTERM or
@@ -83,10 +85,12 @@ func Run(cfg Config) error {
 	}()
 
 	handler := NewRouter(a, cfg.ProjectManager, cfg.WebFS, RouterConfig{
-		HTTPMode:     cfg.HTTPMode,
-		BaseDomain:   cfg.BaseDomain,
-		HostAliases:  cfg.HostAliases,
-		AgentBackend: cfg.AgentBackend,
+		HTTPMode:         cfg.HTTPMode,
+		BaseDomain:       cfg.BaseDomain,
+		HostAliases:      cfg.HostAliases,
+		AgentBackend:     cfg.AgentBackend,
+		AgentServerURL:   cfg.AgentServerURL,
+		AgentServerToken: cfg.AgentServerToken,
 	}, cfg.OpenCodeClient, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
 
 	if cfg.HTTPMode {

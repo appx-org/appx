@@ -23,11 +23,13 @@ import (
 // RouterConfig holds runtime configuration that affects routing behaviour.
 // Passed to NewRouter so middleware can adapt to the deployment mode.
 type RouterConfig struct {
-	HTTPMode     bool     // true = plain HTTP dev mode, affects security headers
-	BaseDomain   string   // base domain for subdomain routing
-	HostAliases  []string // additional hostnames/IPs that also serve the dashboard (e.g. server IP)
-	AgentBackend string   // opencode or pi
-	OpenCodeURL  string   // URL of the OpenCode server (default "http://localhost:4096")
+	HTTPMode         bool     // true = plain HTTP dev mode, affects security headers
+	BaseDomain       string   // base domain for subdomain routing
+	HostAliases      []string // additional hostnames/IPs that also serve the dashboard (e.g. server IP)
+	AgentBackend     string   // opencode or pi
+	OpenCodeURL      string   // URL of the OpenCode server (default "http://localhost:4096")
+	AgentServerURL   string   // URL of the Pi agent-server (default "http://127.0.0.1:4001")
+	AgentServerToken string   // optional bearer token for Pi agent-server
 }
 
 // NewRouter builds the top-level HTTP handler. All requests go through auth
@@ -64,6 +66,17 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 		api.HandleFunc("GET /api/egress/pending", handleGetEgressPending(ep))
 		api.HandleFunc("POST /api/egress/pending/{id}/approve", handleApproveEgressRequest(ep))
 		api.HandleFunc("POST /api/egress/pending/{id}/deny", handleDenyEgressRequest(ep))
+	}
+	if rcfg.AgentBackend == "pi" {
+		agentServerURL := rcfg.AgentServerURL
+		if agentServerURL == "" {
+			agentServerURL = "http://127.0.0.1:4001"
+		}
+		agentProxy := agentServerProxyHandler(pm, agentServerURL, rcfg.AgentServerToken)
+		api.Handle("GET /api/projects/{id}/agent/{agentPath...}", agentProxy)
+		api.Handle("POST /api/projects/{id}/agent/{agentPath...}", agentProxy)
+		api.Handle("PATCH /api/projects/{id}/agent/{agentPath...}", agentProxy)
+		api.Handle("DELETE /api/projects/{id}/agent/{agentPath...}", agentProxy)
 	}
 	mux.Handle("/api/", limitBody(a.Middleware(requireJSON(api))))
 

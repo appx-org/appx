@@ -7,11 +7,12 @@ import {
   type Project as ProjectType,
 } from '../api/client';
 import { SessionList, ChatPanel } from '../components/agent';
+import PiAgentPane from '../components/pi-agent/PiAgentPane';
 import Terminal from '../components/Terminal';
 
 /** Project is the full-page project view with tabbed Agent/Terminal interface.
- *  The Agent tab uses the OpenCode SDK for sessions and chat. The Terminal tab
- *  connects to OpenCode's PTY. No container lifecycle -- OpenCode runs as systemd. */
+ *  The Agent tab uses the configured agent backend. The Terminal tab is a
+ *  local PTY rooted in the project directory. */
 export default function Project() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -22,6 +23,7 @@ export default function Project() {
   const [activeTab, setActiveTab] = useState<'agent' | 'terminal'>('agent');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [baseDomain, setBaseDomain] = useState('localhost');
+  const [agentBackend, setAgentBackend] = useState<'opencode' | 'pi'>('opencode');
 
   const fetchProject = useCallback(async () => {
     if (!id) return;
@@ -43,7 +45,10 @@ export default function Project() {
   useEffect(() => {
     fetchProject();
     getServerConfig()
-      .then((cfg) => setBaseDomain(cfg.baseDomain || 'localhost'))
+      .then((cfg) => {
+        setBaseDomain(cfg.baseDomain || 'localhost');
+        setAgentBackend(cfg.agentBackend || 'opencode');
+      })
       .catch(() => {});
   }, [fetchProject]);
 
@@ -109,20 +114,24 @@ export default function Project() {
 
       <div style={styles.main}>
         {activeTab === 'agent' ? (
-          <div style={styles.agentLayout}>
-            <SessionList
-              projectDir={projectDir}
-              activeSessionId={activeSessionId}
-              onSelectSession={setActiveSessionId}
-            />
-            {activeSessionId ? (
-              <ChatPanel sessionId={activeSessionId} projectDir={projectDir} />
-            ) : (
-              <div style={styles.centered}>
-                <span style={styles.statusLabel}>Select or create a session</span>
-              </div>
-            )}
-          </div>
+          agentBackend === 'pi' ? (
+            <PiAgentPane projectId={project.id} />
+          ) : (
+            <div style={styles.agentLayout}>
+              <SessionList
+                projectDir={projectDir}
+                activeSessionId={activeSessionId}
+                onSelectSession={setActiveSessionId}
+              />
+              {activeSessionId ? (
+                <ChatPanel sessionId={activeSessionId} projectDir={projectDir} />
+              ) : (
+                <div style={styles.centered}>
+                  <span style={styles.statusLabel}>Select or create a session</span>
+                </div>
+              )}
+            </div>
+          )
         ) : (
           <Terminal cwd={projectDir} />
         )}

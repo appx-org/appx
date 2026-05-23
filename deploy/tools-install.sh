@@ -10,6 +10,7 @@
 #   - Node.js 24  (via nvm, pinned to major version — runtime + agents)
 #   - OpenCode    (legacy AI agent backend, version pinned to deploy/opencode-version)
 #   - Pi          (AI coding agent CLI/SDK, version pinned to deploy/pi-version)
+#   - agent-server (Pi SDK HTTP/SSE bridge, installed from sibling repo when present)
 #   - Claude Code (Claude CLI for terminal use — self-update: npm update -g @anthropic-ai/claude-code)
 #   - uv          (Python version/package manager — self-update: uv self update)
 #
@@ -170,6 +171,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Appx agent-server (installed from sibling checkout when present)
+# ---------------------------------------------------------------------------
+
+if [ "$APPX_AGENT_BACKEND" = "pi" ]; then
+  AGENT_SERVER_DIR="${AGENT_SERVER_DIR:-}"
+  if [ -z "$AGENT_SERVER_DIR" ] && [ -d "$REPO_DIR/../agent-server" ]; then
+    AGENT_SERVER_DIR="$(cd "$REPO_DIR/../agent-server" && pwd)"
+  fi
+
+  if [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/package.json" ]; then
+    echo "installing agent-server from $AGENT_SERVER_DIR..."
+    (
+      cd "$AGENT_SERVER_DIR"
+      npm ci
+      npm run build
+      npm install -g .
+    )
+    ln -sf "$NODE_BIN_DIR/agent-server" /usr/local/bin/agent-server
+    echo "agent-server installed: /usr/local/bin/agent-server"
+  else
+    echo "agent-server repo not found; clone appx-org/agent-server next to appx or set AGENT_SERVER_DIR"
+  fi
+else
+  echo "skipping agent-server install (APPX_AGENT_BACKEND=$APPX_AGENT_BACKEND)"
+fi
+
+# ---------------------------------------------------------------------------
 # Claude Code (self-update: sudo npm update -g @anthropic-ai/claude-code)
 # ---------------------------------------------------------------------------
 
@@ -216,4 +244,5 @@ echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"
 echo "  opencode: $(/usr/local/bin/opencode --version 2>/dev/null || echo "skipped ($APPX_AGENT_BACKEND)")"
 echo "  pi:       $(/usr/local/bin/pi --version 2>&1 || echo 'not found')"
+echo "  agent-server: $(test -x /usr/local/bin/agent-server && echo installed || echo 'not found')"
 echo "  claude:   $(claude --version 2>/dev/null || echo 'not found')"

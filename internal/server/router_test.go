@@ -1001,6 +1001,132 @@ func TestOpenCodeProxy_ClearsWriteDeadline(t *testing.T) {
 	}
 }
 
+// setupTestWithAgentServerBackend creates a test handler configured to proxy
+// /api/projects/{id}/agent/* requests to the given agent-server URL.
+func setupTestWithAgentServerBackend(t *testing.T, agentServerURL string, token string) (http.Handler, *auth.Store, *sql.DB) {
+	t.Helper()
+	rcfg := RouterConfig{AgentBackend: "pi", AgentServerURL: agentServerURL, AgentServerToken: token}
+	return setupTestWithConfig(t, rcfg)
+}
+
+func insertProject(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	_, err := db.Exec(
+		"INSERT INTO projects (id, name, status, assigned_port) VALUES (?, ?, 'running', 3000)",
+		id,
+		"proj-"+id,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAgentServerProxy_RequiresAuth(t *testing.T) {
+	handler, _, db := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+	insertProject(t, db, "p1")
+
+	req := httptest.NewRequest("GET", "/api/projects/p1/agent/sessions", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":   r.URL.Path,
+			"query":  r.URL.RawQuery,
+			"method": r.Method,
+		})
+	}))
+	defer backend.Close()
+
+	handler, store, db := setupTestWithAgentServerBackend(t, backend.URL, "")
+	insertProject(t, db, "p1")
+
+	req := authedRequest(t, store, "GET", "/api/projects/p1/agent/sessions?limit=10", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "/v1/sessions" {
+		t.Errorf("expected path /v1/sessions after prefix strip, got %q", resp["path"])
+	}
+	if resp["query"] != "limit=10" {
+		t.Errorf("expected query string preserved, got %q", resp["query"])
+	}
+}
+
+func TestAgentServerProxy_StripsCookieAndAddsBearer(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"cookie":        r.Header.Get("Cookie"),
+			"authorization": r.Header.Get("Authorization"),
+		})
+	}))
+	defer backend.Close()
+
+	handler, store, db := setupTestWithAgentServerBackend(t, backend.URL, "secret-token")
+	insertProject(t, db, "p1")
+
+	req := authedRequest(t, store, "GET", "/api/projects/p1/agent/sessions", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["cookie"] != "" {
+		t.Errorf("expected appx cookie to be stripped, got %q", resp["cookie"])
+	}
+	if resp["authorization"] != "Bearer secret-token" {
+		t.Errorf("expected bearer token forwarded, got %q", resp["authorization"])
+	}
+}
+
+func TestAgentServerProxy_UnknownProjectReturns404(t *testing.T) {
+	handler, store, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+
+	req := authedRequest(t, store, "GET", "/api/projects/nope/agent/sessions", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestAgentServerProxy_ClearsWriteDeadline(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	handler, store, db := setupTestWithAgentServerBackend(t, backend.URL, "")
+	insertProject(t, db, "p1")
+
+	req := authedRequest(t, store, "GET", "/api/projects/p1/agent/sessions/s1/events", "")
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	handler.ServeHTTP(rec, req)
+
+	if !rec.writeDeadlineCleared {
+		t.Error("expected write deadline to be cleared for agent-server proxy requests")
+	}
+}
+
 func TestSubdomainDispatch_BaseDomain_ServesDashboard(t *testing.T) {
 	handler, _, _ := setupTestWithConfig(t, RouterConfig{BaseDomain: "localhost"})
 

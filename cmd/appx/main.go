@@ -164,6 +164,8 @@ func main() {
 	if agentBackend != "opencode" && agentBackend != "pi" {
 		log.Fatalf("unsupported APPX_AGENT_BACKEND=%q (expected opencode or pi)", agentBackend)
 	}
+	agentServerURL := envOr("APPX_AGENT_SERVER_URL", "http://127.0.0.1:4001")
+	agentServerToken := os.Getenv("APPX_AGENT_SERVER_TOKEN")
 
 	var ocClient *opencode.Client
 	if agentBackend == "opencode" {
@@ -204,23 +206,25 @@ func main() {
 	localManager := terminal.NewLocalManager(512 * 1024) // 512 KB ring buffer
 
 	if err := server.Run(server.Config{
-		Port:            *port,
-		InternalsDir:    internalsDir,
-		DB:              database,
-		AuthStore:       authStore,
-		ProjectManager:  pm,
-		WebFS:           webFS,
-		TLSHosts:        hosts,
-		Domain:          *domain,
-		CloudflareToken: os.Getenv("CLOUDFLARE_API_TOKEN"),
-		HTTPMode:        *httpMode,
-		BaseDomain:      baseDomain,
-		HostAliases:     hosts,
-		AgentBackend:    agentBackend,
-		OpenCodeClient:  ocClient,
-		EgressStore:     egressStore,
-		EgressPending:   pendingRegistry,
-		LocalManager:    localManager,
+		Port:             *port,
+		InternalsDir:     internalsDir,
+		DB:               database,
+		AuthStore:        authStore,
+		ProjectManager:   pm,
+		WebFS:            webFS,
+		TLSHosts:         hosts,
+		Domain:           *domain,
+		CloudflareToken:  os.Getenv("CLOUDFLARE_API_TOKEN"),
+		HTTPMode:         *httpMode,
+		BaseDomain:       baseDomain,
+		HostAliases:      hosts,
+		AgentBackend:     agentBackend,
+		AgentServerURL:   agentServerURL,
+		AgentServerToken: agentServerToken,
+		OpenCodeClient:   ocClient,
+		EgressStore:      egressStore,
+		EgressPending:    pendingRegistry,
+		LocalManager:     localManager,
 	}); err != nil {
 		log.Fatal(err)
 	}
