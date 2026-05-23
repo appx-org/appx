@@ -74,6 +74,7 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 		}
 		agentGlobalProxy := agentServerGlobalProxyHandler(agentServerURL, rcfg.AgentServerToken)
 		api.Handle("GET /api/agent/{agentPath...}", agentGlobalProxy)
+		api.Handle("POST /api/agent/{agentPath...}", agentGlobalProxy)
 		api.Handle("PUT /api/agent/{agentPath...}", agentGlobalProxy)
 		api.Handle("DELETE /api/agent/{agentPath...}", agentGlobalProxy)
 		agentProxy := agentServerProxyHandler(pm, agentServerURL, rcfg.AgentServerToken)

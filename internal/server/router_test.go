@@ -1101,6 +1101,36 @@ func TestAgentServerGlobalProxy_Authed_ForwardsAuthRequest(t *testing.T) {
 	}
 }
 
+func TestAgentServerGlobalProxy_Authed_ForwardsPostRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":   r.URL.Path,
+			"method": r.Method,
+		})
+	}))
+	defer backend.Close()
+
+	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "")
+
+	req := authedRequest(t, store, "POST", "/api/agent/auth/providers/openai-codex/subscription/start", "{}")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "/v1/auth/providers/openai-codex/subscription/start" {
+		t.Errorf("expected subscription path after prefix strip, got %q", resp["path"])
+	}
+	if resp["method"] != "POST" {
+		t.Errorf("expected POST forwarded, got %q", resp["method"])
+	}
+}
+
 func TestAgentServerGlobalProxy_RequiresAuth(t *testing.T) {
 	handler, _, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
 

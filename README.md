@@ -81,7 +81,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite. In Pi mode the Appx UI proxies project agent and provider-auth requests to `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`), where the separate `agent-server` repo runs the Pi SDK session API.
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite. In Pi mode the Appx UI proxies project agent, provider-auth, subscription login, and custom-provider requests to `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`), where the separate `agent-server` repo runs the Pi SDK session API.
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
@@ -194,6 +194,11 @@ Each new project is scaffolded with a project-local Pi harness under
 extension, egress skill helper, and `settings.json` for reviewed/pinned Pi
 packages. Third-party Pi packages are not installed by default because they run
 inside the agent process.
+
+Pi credentials are configured from Settings. Built-in providers can use stored
+API keys or Pi subscription auth where the provider supports it, and custom
+providers such as LiteLLM are written to the agent service user's
+`models.json` without exposing secret values back to the browser.
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 

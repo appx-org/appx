@@ -109,11 +109,56 @@ export function deleteApiKey() {
 
 export interface AgentAuthProvider {
   provider: string;
+  name: string;
   configured: boolean;
+  credentialType?: 'api_key' | 'oauth';
   source?: 'stored' | 'runtime' | 'environment' | 'fallback' | 'models_json_key' | 'models_json_command';
   label?: string;
+  supportsApiKey: boolean;
+  supportsSubscription: boolean;
   modelCount: number;
   availableModelCount: number;
+}
+
+export interface AgentOAuthFlowState {
+  id: string;
+  provider: string;
+  providerName: string;
+  status: 'starting' | 'prompt' | 'auth' | 'waiting' | 'complete' | 'error' | 'cancelled';
+  authUrl?: string;
+  instructions?: string;
+  prompt?: {
+    message: string;
+    placeholder?: string;
+    allowEmpty?: boolean;
+  };
+  progress: string[];
+  error?: string;
+  expiresAt: string;
+}
+
+export type AgentCustomProviderApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+
+export interface AgentCustomProviderModel {
+  id: string;
+  name?: string;
+  api?: AgentCustomProviderApi;
+  reasoning?: boolean;
+  thinkingLevelMap?: Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh', string | null>>;
+  input?: Array<'text' | 'image'>;
+  contextWindow?: number;
+  maxTokens?: number;
+  compat?: Record<string, unknown>;
+}
+
+export interface AgentCustomProvider {
+  provider: string;
+  name?: string;
+  baseUrl?: string;
+  api?: AgentCustomProviderApi;
+  apiKeyConfigured: boolean;
+  modelCount: number;
+  models: AgentCustomProviderModel[];
 }
 
 /** Fetches Pi provider auth status. No secret values are returned. */
@@ -132,6 +177,61 @@ export function setAgentProviderApiKey(provider: string, key: string) {
 /** Removes a stored Pi provider credential from the agent runtime user's auth storage. */
 export function deleteAgentProviderCredential(provider: string) {
   return request<{ ok: true }>(`/agent/auth/providers/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Starts a Pi subscription OAuth flow for a provider such as OpenAI Codex or Anthropic. */
+export function startAgentProviderSubscription(provider: string) {
+  return request<AgentOAuthFlowState>(
+    `/agent/auth/providers/${encodeURIComponent(provider)}/subscription/start`,
+    { method: 'POST' },
+  );
+}
+
+/** Fetches the current state for a pending subscription auth flow. */
+export function getAgentSubscriptionFlow(flowId: string) {
+  return request<AgentOAuthFlowState>(`/agent/auth/subscription/${encodeURIComponent(flowId)}`);
+}
+
+/** Continues a pending subscription auth flow with prompt input or a pasted redirect URL/code. */
+export function continueAgentSubscriptionFlow(flowId: string, value: string) {
+  return request<AgentOAuthFlowState>(`/agent/auth/subscription/${encodeURIComponent(flowId)}/continue`, {
+    method: 'POST',
+    body: JSON.stringify({ value }),
+  });
+}
+
+/** Cancels a pending subscription auth flow. */
+export function cancelAgentSubscriptionFlow(flowId: string) {
+  return request<AgentOAuthFlowState>(`/agent/auth/subscription/${encodeURIComponent(flowId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Lists Pi custom providers managed through agent-server models.json. */
+export function getAgentCustomProviders() {
+  return request<{ providers: AgentCustomProvider[] }>('/agent/custom/providers');
+}
+
+/** Creates or updates a Pi custom provider, including LiteLLM-compatible providers. */
+export function upsertAgentCustomProvider(body: {
+  provider: string;
+  name?: string;
+  baseUrl: string;
+  api: AgentCustomProviderApi;
+  apiKey?: string;
+  models: AgentCustomProviderModel[];
+}) {
+  return request<AgentCustomProvider>('/agent/custom/providers', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Removes a custom Pi provider from models.json. */
+export function deleteAgentCustomProvider(provider: string) {
+  return request<{ ok: true }>(`/agent/custom/providers/${encodeURIComponent(provider)}`, {
     method: 'DELETE',
   });
 }
