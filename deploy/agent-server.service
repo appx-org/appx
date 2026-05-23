@@ -11,6 +11,15 @@ UMask=0007
 
 EnvironmentFile=/etc/appx/appx.env
 Environment=HOME=/home/opencode
+
+# Route provider HTTPS traffic through appx's egress CONNECT proxy on 127.0.0.1:9080.
+# This keeps Pi model calls behind the same allowlist and request logging as the
+# legacy OpenCode backend. Node.js needs NODE_USE_ENV_PROXY=1 before fetch/core
+# HTTP clients honor HTTPS_PROXY/NO_PROXY.
+Environment=NODE_USE_ENV_PROXY=1
+Environment=HTTPS_PROXY=http://127.0.0.1:9080
+Environment=NO_PROXY=localhost,127.0.0.1
+
 Environment=AGENT_SERVER_MODE=multi
 Environment=PROJECT_DIR=__APPX_PROJECTS_DIR__
 Environment=SESSIONS_DIR=/home/opencode/.pi/agent/appx-default-sessions

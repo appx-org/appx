@@ -22,6 +22,7 @@ Environment=HOME=/home/opencode
 # opencode doesn't make outbound HTTPS requests during its own startup. Agent
 # HTTPS calls only happen after a user sends a message, by which time appx
 # (and the egress proxy) is running.
+Environment=NODE_USE_ENV_PROXY=1
 Environment=HTTPS_PROXY=http://127.0.0.1:9080
 # Prevent internal traffic (localhost API calls) from going through the proxy.
 Environment=NO_PROXY=localhost,127.0.0.1

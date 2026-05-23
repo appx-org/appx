@@ -179,6 +179,12 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   expect_ok "opencode service enabled"     systemctl is-enabled opencode
   expect_ok "opencode ExecStart is /usr/local/bin" \
     grep -q "ExecStart=/usr/local/bin/opencode" /etc/systemd/system/opencode.service
+  expect_ok "opencode uses Node env proxy support" \
+    grep -q "NODE_USE_ENV_PROXY=1" /etc/systemd/system/opencode.service
+  expect_ok "opencode routes HTTPS through egress proxy" \
+    grep -q "HTTPS_PROXY=http://127.0.0.1:9080" /etc/systemd/system/opencode.service
+  expect_ok "opencode bypasses proxy for localhost" \
+    grep -q "NO_PROXY=localhost,127.0.0.1" /etc/systemd/system/opencode.service
   expect_deny "agent-server.service absent for opencode backend" test -f /etc/systemd/system/agent-server.service
 else
   expect_deny "opencode.service absent for pi backend" test -f /etc/systemd/system/opencode.service
@@ -188,6 +194,12 @@ else
     grep -q "AGENT_SERVER_MODE=multi" /etc/systemd/system/agent-server.service
   expect_ok "agent-server ExecStart is /usr/local/bin" \
     grep -q "ExecStart=/usr/local/bin/agent-server" /etc/systemd/system/agent-server.service
+  expect_ok "agent-server uses Node env proxy support" \
+    grep -q "NODE_USE_ENV_PROXY=1" /etc/systemd/system/agent-server.service
+  expect_ok "agent-server routes HTTPS through egress proxy" \
+    grep -q "HTTPS_PROXY=http://127.0.0.1:9080" /etc/systemd/system/agent-server.service
+  expect_ok "agent-server bypasses proxy for localhost" \
+    grep -q "NO_PROXY=localhost,127.0.0.1" /etc/systemd/system/agent-server.service
 fi
 expect_ok "appx ExecStart is /usr/local/bin" \
   grep -q "ExecStart=/usr/local/bin/appx" /etc/systemd/system/appx.service

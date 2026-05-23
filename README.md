@@ -88,7 +88,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite. In Pi mode the Appx UI proxies project agent sessions to project-scoped `agent-server` runtimes and proxies provider-auth, subscription login, and custom-provider requests to shared Pi agent settings at `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`).
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite. In Pi mode the Appx UI proxies project agent sessions to project-scoped `agent-server` runtimes and proxies provider-auth, subscription login, and custom-provider requests to shared Pi agent settings at `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`). The Pi agent service runs with `NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://127.0.0.1:9080`, and `NO_PROXY=localhost,127.0.0.1`, so provider traffic goes through the Appx egress allowlist while local agent traffic stays on loopback.
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
