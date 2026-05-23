@@ -1038,9 +1038,12 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"path":   r.URL.Path,
-			"query":  r.URL.RawQuery,
-			"method": r.Method,
+			"path":        r.URL.Path,
+			"query":       r.URL.RawQuery,
+			"method":      r.Method,
+			"projectId":   r.Header.Get(agentProjectIDHeader),
+			"projectName": r.Header.Get(agentProjectNameHeader),
+			"projectDir":  r.Header.Get(agentProjectDirHeader),
 		})
 	}))
 	defer backend.Close()
@@ -1058,11 +1061,20 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["path"] != "/v1/sessions" {
-		t.Errorf("expected path /v1/sessions after prefix strip, got %q", resp["path"])
+	if resp["path"] != "/v1/projects/p1/sessions" {
+		t.Errorf("expected path /v1/projects/p1/sessions after prefix strip, got %q", resp["path"])
 	}
 	if resp["query"] != "limit=10" {
 		t.Errorf("expected query string preserved, got %q", resp["query"])
+	}
+	if resp["projectId"] != "p1" {
+		t.Errorf("expected trusted project id header p1, got %q", resp["projectId"])
+	}
+	if resp["projectName"] != "proj-p1" {
+		t.Errorf("expected trusted project name header proj-p1, got %q", resp["projectName"])
+	}
+	if !strings.Contains(resp["projectDir"], "proj-p1") {
+		t.Errorf("expected trusted project dir to include proj-p1, got %q", resp["projectDir"])
 	}
 }
 
