@@ -50,6 +50,8 @@ const defaultCustomForm: CustomForm = {
   maxTokens: '16384',
 };
 
+const callbackSubscriptionProviders = new Set(['anthropic', 'openai-codex']);
+
 function sourceLabel(source?: AgentAuthProvider['source']) {
   switch (source) {
     case 'stored':
@@ -173,6 +175,7 @@ export default function Settings() {
   const [newKey, setNewKey] = useState('');
   const [subscriptionFlow, setSubscriptionFlow] = useState<AgentOAuthFlowState | null>(null);
   const [subscriptionInput, setSubscriptionInput] = useState('');
+  const [subscriptionFallbackOpen, setSubscriptionFallbackOpen] = useState(false);
   const [customForm, setCustomForm] = useState<CustomForm>(defaultCustomForm);
   const [saving, setSaving] = useState(false);
   const [customSaving, setCustomSaving] = useState(false);
@@ -207,6 +210,7 @@ export default function Settings() {
     setSelectedProvider(provider);
     setNewKey('');
     setSubscriptionInput('');
+    setSubscriptionFallbackOpen(false);
     setSubscriptionFlow(null);
   }, []);
 
@@ -260,6 +264,7 @@ export default function Settings() {
           setSubscriptionFlow(state);
           if (state.status === 'complete') {
             setSubscriptionInput('');
+            setSubscriptionFallbackOpen(false);
             setSuccess(`${state.providerName} subscription saved.`);
             await loadPiAuth();
           }
@@ -343,10 +348,12 @@ export default function Settings() {
     setSubscriptionBusy(true);
     clearMessages();
     setSubscriptionInput('');
+    setSubscriptionFallbackOpen(false);
     try {
       const state = await startAgentProviderSubscription(selectedProvider);
       setSubscriptionFlow(state);
       if (state.status === 'complete') {
+        setSubscriptionFallbackOpen(false);
         setSuccess(`${state.providerName} subscription saved.`);
         await loadPiAuth();
       }
@@ -366,6 +373,7 @@ export default function Settings() {
       setSubscriptionFlow(state);
       if (state.status === 'complete') {
         setSubscriptionInput('');
+        setSubscriptionFallbackOpen(false);
         setSuccess(`${state.providerName} subscription saved.`);
         await loadPiAuth();
       }
@@ -384,6 +392,7 @@ export default function Settings() {
       await cancelAgentSubscriptionFlow(subscriptionFlow.id);
       setSubscriptionFlow(null);
       setSubscriptionInput('');
+      setSubscriptionFallbackOpen(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to cancel subscription login');
     } finally {
@@ -464,7 +473,17 @@ export default function Settings() {
       ? subscriptionFlow.prompt?.placeholder || 'Value'
       : 'Paste redirect URL or authorization code';
   const subscriptionNeedsInput =
-    subscriptionFlow?.status === 'prompt' || subscriptionFlow?.status === 'auth';
+    subscriptionFlow?.status === 'prompt' ||
+    (subscriptionFlow?.status === 'auth' && subscriptionFallbackOpen);
+  const subscriptionCanUseFallback =
+    subscriptionFlow?.status === 'auth' &&
+    callbackSubscriptionProviders.has(subscriptionFlow.provider) &&
+    !isFlowTerminal(subscriptionFlow);
+  const showSubscriptionInstructions =
+    Boolean(subscriptionFlow?.instructions) &&
+    (subscriptionFlow?.status !== 'auth' ||
+      subscriptionFallbackOpen ||
+      !callbackSubscriptionProviders.has(subscriptionFlow.provider));
   const subscriptionContinueDisabled =
     subscriptionBusy ||
     !subscriptionFlow ||
@@ -591,19 +610,34 @@ export default function Settings() {
                     <span style={styles.statusMuted}>{subscriptionFlow.status}</span>
                   </div>
                   {subscriptionFlow.authUrl && (
-                    <a style={styles.authLink} href={subscriptionFlow.authUrl} target="_blank" rel="noreferrer">
-                      Open login
-                    </a>
+                    <div style={styles.loginRow}>
+                      <a style={styles.loginLink} href={subscriptionFlow.authUrl} target="_blank" rel="noreferrer">
+                        Open login
+                      </a>
+                      {!subscriptionFallbackOpen && !isFlowTerminal(subscriptionFlow) && (
+                        <span style={styles.waitingText}>Waiting for login to finish</span>
+                      )}
+                    </div>
                   )}
                   {subscriptionFlow.prompt && (
                     <p style={styles.flowText}>{subscriptionFlow.prompt.message}</p>
                   )}
-                  {subscriptionFlow.instructions && (
+                  {showSubscriptionInstructions && (
                     <p style={styles.flowText}>{subscriptionFlow.instructions}</p>
                   )}
                   {subscriptionFlow.error && <div style={styles.error}>{subscriptionFlow.error}</div>}
                   {subscriptionFlow.progress.length > 0 && (
                     <div style={styles.progressText}>{subscriptionFlow.progress.at(-1)}</div>
+                  )}
+                  {subscriptionCanUseFallback && !subscriptionFallbackOpen && (
+                    <button
+                      data-btn="text"
+                      type="button"
+                      style={styles.fallbackBtn}
+                      onClick={() => setSubscriptionFallbackOpen(true)}
+                    >
+                      Use manual fallback
+                    </button>
                   )}
                   {subscriptionNeedsInput && (
                     <div style={styles.flowInputRow}>
@@ -620,7 +654,7 @@ export default function Settings() {
                         onClick={handleContinueSubscription}
                         disabled={subscriptionContinueDisabled}
                       >
-                        Continue
+                        {subscriptionFlow.status === 'prompt' ? 'Continue' : 'Submit'}
                       </button>
                     </div>
                   )}
@@ -1189,12 +1223,30 @@ const styles: Record<string, CSSProperties> = {
     gap: 12,
     marginBottom: 8,
   },
-  authLink: {
-    color: 'var(--cyan)',
+  loginRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  loginLink: {
+    background: 'var(--blue)',
+    border: 'none',
+    borderRadius: 4,
+    color: '#fff',
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 34,
+    padding: '8px 14px',
     fontSize: 13,
+    fontWeight: 500,
     textDecoration: 'none',
-    display: 'inline-block',
-    marginBottom: 8,
+  },
+  waitingText: {
+    color: 'var(--green)',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
   },
   flowText: {
     color: 'var(--muted)',
@@ -1208,6 +1260,14 @@ const styles: Record<string, CSSProperties> = {
     color: 'var(--muted)',
     fontSize: 11,
     marginBottom: 8,
+  },
+  fallbackBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--cyan)',
+    padding: '2px 0 10px',
+    fontSize: 12,
+    cursor: 'pointer',
   },
   flowInputRow: {
     display: 'grid',
