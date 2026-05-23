@@ -1,12 +1,16 @@
 import {
   abortPiSession,
   getPiSessionMessages,
+  listPiExtensionUiRequests,
   piEventsUrl,
+  respondPiExtensionUiRequest,
   sendPiPrompt,
+  type PiExtensionUiResponse,
 } from '../../api/piAgent';
 import { sessionReducer, type SessionAction } from './reducer';
 import {
   type AgentEvent,
+  type ExtensionUiRequest,
   type AgentMessage,
   type SessionState,
   initialSessionState,
@@ -69,6 +73,15 @@ export function attach(projectId: string, sessionId: string): SessionState {
     })
     .catch((err) => dispatch(entryKey, { type: 'set_error', error: err instanceof Error ? err.message : String(err) }));
 
+  void listPiExtensionUiRequests(projectId, sessionId)
+    .then((r) => {
+      dispatch(entryKey, {
+        type: 'load_extension_requests',
+        requests: r.requests as ExtensionUiRequest[],
+      });
+    })
+    .catch((err) => dispatch(entryKey, { type: 'set_error', error: err instanceof Error ? err.message : String(err) }));
+
   return initial;
 }
 
@@ -104,6 +117,16 @@ export async function sendPrompt(projectId: string, sessionId: string, text: str
 
 export async function abortSession(projectId: string, sessionId: string): Promise<void> {
   await abortPiSession(projectId, sessionId);
+}
+
+export async function respondExtensionRequest(
+  projectId: string,
+  sessionId: string,
+  requestId: string,
+  response: PiExtensionUiResponse,
+): Promise<void> {
+  await respondPiExtensionUiRequest(projectId, sessionId, requestId, response);
+  dispatch(key(projectId, sessionId), { type: 'extension_ui_response', requestId });
 }
 
 export function detach(projectId: string, sessionId: string): void {

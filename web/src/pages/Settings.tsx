@@ -316,7 +316,7 @@ export default function Settings() {
 
   useEffect(() => {
     setCredentialMode(preferredCredentialMode(selected));
-  }, [selectedProvider, selected?.supportsSubscription, selected?.credentialType]);
+  }, [selected]);
 
   const handleProviderSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     chooseProvider(event.target.value);

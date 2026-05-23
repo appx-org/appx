@@ -204,7 +204,9 @@ The Agent tab consumes Appx's project-scoped `/api/projects/{id}/agent/*`
 proxy, not provider-specific OpenAI or Anthropic streams. `agent-server` turns
 all supported Pi providers into the same session HTTP/SSE contract, so frontend
 streaming code should handle Pi `message_update` events by `contentIndex` for
-text and tool-call blocks.
+text and tool-call blocks. Pi extension UI requests, including Appx guardrail
+approvals for risky commands, are delivered over the same session stream and
+answered through the project-scoped agent proxy.
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 

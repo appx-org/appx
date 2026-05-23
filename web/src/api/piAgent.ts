@@ -28,6 +28,11 @@ export type PiSessionModelSettings = {
   isStreaming: boolean;
 };
 
+export type PiExtensionUiResponse =
+  | { value: string }
+  | { confirmed: boolean }
+  | { cancelled: true };
+
 function agentBase(projectId: string) {
   return `/api/projects/${encodeURIComponent(projectId)}/agent`;
 }
@@ -125,6 +130,27 @@ export function abortPiSession(projectId: string, sessionId: string) {
   return request<{ ok: true }>(
     `${agentBase(projectId)}/sessions/${encodeURIComponent(sessionId)}/abort`,
     { method: 'POST' },
+  );
+}
+
+export function listPiExtensionUiRequests(projectId: string, sessionId: string) {
+  return request<{ requests: unknown[] }>(
+    `${agentBase(projectId)}/sessions/${encodeURIComponent(sessionId)}/extension-ui`,
+  );
+}
+
+export function respondPiExtensionUiRequest(
+  projectId: string,
+  sessionId: string,
+  requestId: string,
+  body: PiExtensionUiResponse,
+) {
+  return request<{ ok: true }>(
+    `${agentBase(projectId)}/sessions/${encodeURIComponent(sessionId)}/extension-ui/${encodeURIComponent(requestId)}/response`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
   );
 }
 

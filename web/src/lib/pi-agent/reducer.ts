@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  ExtensionUiRequest,
   AgentMessage,
   AssistantMessagePartial,
   MessageContent,
@@ -276,6 +277,8 @@ export type SessionAction =
   | { type: 'set_error'; error: string | null }
   | { type: 'user_prompt_submitted'; text: string }
   | { type: 'load_history'; messages: AgentMessage[] }
+  | { type: 'load_extension_requests'; requests: ExtensionUiRequest[] }
+  | { type: 'extension_ui_response'; requestId: string }
   | { type: 'reset' };
 
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
@@ -302,12 +305,51 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ],
       };
     case 'reset':
-      return { ...state, messages: [], status: 'idle', error: null };
+      return { ...state, messages: [], extensionRequests: [], extensionNotice: null, status: 'idle', error: null };
     case 'load_history':
       return loadHistory(state, action.messages);
+    case 'load_extension_requests':
+      return mergeExtensionRequests(state, action.requests);
+    case 'extension_ui_response':
+      return {
+        ...state,
+        extensionRequests: state.extensionRequests.filter((request) => request.id !== action.requestId),
+      };
     case 'agent_event':
       return reduceEvent(state, action.event);
   }
+}
+
+function isBlockingExtensionRequest(request: ExtensionUiRequest): boolean {
+  return request.method === 'select' || request.method === 'confirm' || request.method === 'input' || request.method === 'editor';
+}
+
+function mergeExtensionRequests(state: SessionState, requests: ExtensionUiRequest[]): SessionState {
+  let next = state;
+  for (const request of requests) next = reduceExtensionUiRequest(next, request);
+  return next;
+}
+
+function reduceExtensionUiRequest(state: SessionState, request: ExtensionUiRequest): SessionState {
+  if (request.method === 'setStatus') {
+    const extensionStatus = { ...state.extensionStatus };
+    if (request.statusText) extensionStatus[request.statusKey] = request.statusText;
+    else delete extensionStatus[request.statusKey];
+    return { ...state, extensionStatus };
+  }
+  if (request.method === 'notify') {
+    return {
+      ...state,
+      extensionNotice: {
+        id: request.id,
+        message: request.message,
+        type: request.notifyType,
+      },
+    };
+  }
+  if (!isBlockingExtensionRequest(request)) return state;
+  if (state.extensionRequests.some((existing) => existing.id === request.id)) return state;
+  return { ...state, extensionRequests: [...state.extensionRequests, request] };
 }
 
 function loadHistory(state: SessionState, history: AgentMessage[]): SessionState {
@@ -337,6 +379,8 @@ function loadHistory(state: SessionState, history: AgentMessage[]): SessionState
 
 function reduceEvent(state: SessionState, event: AgentEvent): SessionState {
   switch (event.type) {
+    case 'extension_ui_request':
+      return reduceExtensionUiRequest(state, event);
     case 'agent_start':
       return { ...state, status: 'starting', error: null };
     case 'turn_start':

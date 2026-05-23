@@ -4,9 +4,11 @@ import {
   listPiModels,
   updatePiSessionSettings,
   type PiAgentModel,
+  type PiExtensionUiResponse,
   type PiSessionModelSettings,
   type ThinkingLevel,
 } from '../../api/piAgent';
+import type { ExtensionUiRequest } from '../../lib/pi-agent/types';
 import { usePiSession } from '../../lib/pi-agent/useSession';
 import Markdown from '../Markdown';
 import PiToolCallCard from './PiToolCallCard';
@@ -42,6 +44,109 @@ const thinkingLabels: Record<ThinkingLevel, string> = {
   xhigh: 'X-high',
 };
 
+type BlockingExtensionUiRequest =
+  | Extract<ExtensionUiRequest, { method: 'select' }>
+  | Extract<ExtensionUiRequest, { method: 'confirm' }>
+  | Extract<ExtensionUiRequest, { method: 'input' }>
+  | Extract<ExtensionUiRequest, { method: 'editor' }>;
+
+function isBlockingRequest(request: ExtensionUiRequest): request is BlockingExtensionUiRequest {
+  return request.method === 'select' || request.method === 'confirm' || request.method === 'input' || request.method === 'editor';
+}
+
+function ExtensionRequestPanel({
+  request,
+  onRespond,
+}: {
+  request: BlockingExtensionUiRequest;
+  onRespond: (requestId: string, response: PiExtensionUiResponse) => Promise<void>;
+}) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (request.method === 'editor') setValue(request.prefill ?? '');
+    else if (request.method === 'select') setValue(request.options[0] ?? '');
+    else setValue('');
+    setError('');
+  }, [request]);
+
+  const sendResponse = async (response: PiExtensionUiResponse) => {
+    setBusy(true);
+    setError('');
+    try {
+      await onRespond(request.id, response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={styles.extensionPanel}>
+      <div style={styles.extensionHeader}>
+        <span style={styles.extensionKicker}>PI REQUEST</span>
+        <span style={styles.extensionTitle}>{request.title}</span>
+      </div>
+      {request.method === 'confirm' && <pre style={styles.extensionMessage}>{request.message}</pre>}
+      {request.method === 'input' && (
+        <input
+          style={styles.extensionInput}
+          value={value}
+          placeholder={request.placeholder || 'Value'}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={busy}
+        />
+      )}
+      {request.method === 'editor' && (
+        <textarea
+          style={styles.extensionTextArea}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={busy}
+          rows={5}
+        />
+      )}
+      {request.method === 'select' && (
+        <select
+          style={styles.extensionInput}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={busy}
+        >
+          {request.options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      )}
+      {error && <div style={styles.extensionError}>{error}</div>}
+      <div style={styles.extensionActions}>
+        {request.method === 'confirm' ? (
+          <>
+            <button style={styles.extensionSecondaryBtn} disabled={busy} onClick={() => void sendResponse({ confirmed: false })}>
+              Deny
+            </button>
+            <button style={styles.extensionPrimaryBtn} disabled={busy} onClick={() => void sendResponse({ confirmed: true })}>
+              Approve
+            </button>
+          </>
+        ) : (
+          <>
+            <button style={styles.extensionSecondaryBtn} disabled={busy} onClick={() => void sendResponse({ cancelled: true })}>
+              Cancel
+            </button>
+            <button style={styles.extensionPrimaryBtn} disabled={busy} onClick={() => void sendResponse({ value })}>
+              {request.method === 'select' ? 'Choose' : 'Submit'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PiChatPanel({
   projectId,
   sessionId,
@@ -51,7 +156,7 @@ export default function PiChatPanel({
   sessionId: string;
   onTurnComplete: () => void;
 }) {
-  const { state, sendPrompt, abort } = usePiSession(projectId, sessionId);
+  const { state, sendPrompt, abort, respondExtensionRequest } = usePiSession(projectId, sessionId);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [models, setModels] = useState<PiAgentModel[]>([]);
@@ -66,6 +171,8 @@ export default function PiChatPanel({
   const controlsDisabled = settingsBusy || isRunning || Boolean(sessionSettings?.isStreaming);
   const modelValue = sessionSettings?.model ? modelOptionValue(sessionSettings.model) : '';
   const thinkingLevels: ThinkingLevel[] = sessionSettings?.availableThinkingLevels ?? ['off'];
+  const extensionStatus = Object.values(state.extensionStatus).find(Boolean);
+  const activeExtensionRequest = state.extensionRequests.find(isBlockingRequest);
 
   const loadModelSettings = useCallback(async () => {
     try {
@@ -149,6 +256,7 @@ export default function PiChatPanel({
           <span style={isRunning ? styles.headerStatusActive : styles.headerStatus}>
             {!state.connected ? 'connecting' : isRunning ? state.status : 'idle'}
           </span>
+          {extensionStatus && <span style={styles.extensionStatus}>{extensionStatus}</span>}
           {settingsError && <span style={styles.settingsError} title={settingsError}>model settings unavailable</span>}
         </div>
         <div style={styles.modelControls} aria-label="Agent model settings">
@@ -230,6 +338,14 @@ export default function PiChatPanel({
       </div>
 
       {state.error && <div style={styles.errorBanner}>{state.error}</div>}
+      {state.extensionNotice && (
+        <div style={state.extensionNotice.type === 'error' ? styles.errorBanner : styles.noticeBanner}>
+          {state.extensionNotice.message}
+        </div>
+      )}
+      {activeExtensionRequest && (
+        <ExtensionRequestPanel request={activeExtensionRequest} onRespond={respondExtensionRequest} />
+      )}
 
       <div style={styles.inputBar}>
         <textarea
@@ -292,6 +408,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 10,
     color: 'var(--cyan)',
+  },
+  extensionStatus: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    color: 'var(--muted)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   settingsError: {
     fontFamily: "'JetBrains Mono', monospace",
@@ -402,6 +526,105 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '6px 20px',
     background: 'var(--red-dim)',
     overflowWrap: 'anywhere',
+  },
+  noticeBanner: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    color: 'var(--yellow)',
+    padding: '6px 20px',
+    background: 'rgba(245, 197, 24, 0.09)',
+    overflowWrap: 'anywhere',
+  },
+  extensionPanel: {
+    borderTop: '1px solid var(--border)',
+    background: 'var(--surface)',
+    padding: '12px 20px',
+    display: 'grid',
+    gap: 10,
+  },
+  extensionHeader: {
+    display: 'grid',
+    gap: 3,
+  },
+  extensionKicker: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 9,
+    letterSpacing: '0.1em',
+    color: 'var(--muted)',
+  },
+  extensionTitle: {
+    color: 'var(--text)',
+    fontSize: 13,
+    fontWeight: 500,
+  },
+  extensionMessage: {
+    margin: 0,
+    padding: '10px 12px',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    background: 'var(--bg)',
+    color: 'var(--text)',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 11,
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  extensionInput: {
+    minWidth: 0,
+    width: '100%',
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text)',
+    fontSize: 13,
+    padding: '8px 10px',
+    outline: 'none',
+  },
+  extensionTextArea: {
+    minWidth: 0,
+    width: '100%',
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text)',
+    fontSize: 13,
+    padding: '8px 10px',
+    outline: 'none',
+    resize: 'vertical',
+    fontFamily: "'JetBrains Mono', monospace",
+    lineHeight: 1.45,
+  },
+  extensionError: {
+    color: 'var(--red)',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 10,
+    overflowWrap: 'anywhere',
+  },
+  extensionActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  extensionPrimaryBtn: {
+    background: 'var(--blue)',
+    border: 'none',
+    borderRadius: 4,
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 500,
+    padding: '7px 12px',
+  },
+  extensionSecondaryBtn: {
+    background: 'transparent',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--muted)',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 500,
+    padding: '7px 12px',
   },
   inputBar: {
     display: 'flex',

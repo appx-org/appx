@@ -69,11 +69,11 @@ func agentServerReverseProxy(backendURL string, token string, projectScoped bool
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			agentPath := strings.TrimPrefix(req.PathValue("agentPath"), "/")
-			proxyPath := "/v1/" + agentPath
+			proxyPrefix := "/v1"
 			if projectScoped {
-				proxyPath = "/v1/projects/" + url.PathEscape(req.PathValue("id")) + "/" + agentPath
+				proxyPrefix = "/v1/projects/" + url.PathEscape(req.PathValue("id"))
 			}
-			req.URL.Path = path.Clean(proxyPath)
+			req.URL.Path = cleanAgentServerPath(proxyPrefix, agentPath)
 			req.URL.RawPath = ""
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
@@ -102,4 +102,12 @@ func agentServerReverseProxy(backendURL string, token string, projectScoped bool
 	}
 
 	return proxy
+}
+
+func cleanAgentServerPath(prefix string, agentPath string) string {
+	cleaned := path.Clean("/" + strings.TrimPrefix(agentPath, "/"))
+	if cleaned == "/" {
+		return prefix
+	}
+	return prefix + cleaned
 }

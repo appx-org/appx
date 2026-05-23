@@ -46,7 +46,8 @@ export type AgentEvent =
   | { type: 'tool_execution_update'; toolCallId: string; toolName: string; args: unknown; partialResult: unknown }
   | { type: 'tool_execution_end'; toolCallId: string; toolName: string; result: unknown; isError: boolean }
   | { type: 'turn_end'; message: AgentMessage; toolResults: unknown[] }
-  | { type: 'agent_end'; messages: AgentMessage[] };
+  | { type: 'agent_end'; messages: AgentMessage[] }
+  | ExtensionUiRequest;
 
 export type UiMessagePart =
   | { type: 'text'; text: string; contentIndex?: number }
@@ -68,9 +69,30 @@ export type UiMessage = {
   timestamp: string | number;
 };
 
+export type ExtensionUiRequest =
+  | { type: 'extension_ui_request'; id: string; method: 'select'; title: string; options: string[]; timeout?: number }
+  | { type: 'extension_ui_request'; id: string; method: 'confirm'; title: string; message: string; timeout?: number }
+  | { type: 'extension_ui_request'; id: string; method: 'input'; title: string; placeholder?: string; timeout?: number }
+  | { type: 'extension_ui_request'; id: string; method: 'editor'; title: string; prefill?: string }
+  | { type: 'extension_ui_request'; id: string; method: 'notify'; message: string; notifyType?: 'info' | 'warning' | 'error' }
+  | { type: 'extension_ui_request'; id: string; method: 'setStatus'; statusKey: string; statusText?: string }
+  | { type: 'extension_ui_request'; id: string; method: 'setTitle'; title: string }
+  | { type: 'extension_ui_request'; id: string; method: 'set_editor_text'; text: string }
+  | {
+      type: 'extension_ui_request';
+      id: string;
+      method: 'setWidget';
+      widgetKey: string;
+      widgetLines?: string[];
+      widgetPlacement?: 'aboveEditor' | 'belowEditor';
+    };
+
 export type SessionState = {
   sessionId: string | null;
   messages: UiMessage[];
+  extensionRequests: ExtensionUiRequest[];
+  extensionStatus: Record<string, string>;
+  extensionNotice: { id: string; message: string; type?: 'info' | 'warning' | 'error' } | null;
   status: 'idle' | 'starting' | 'streaming';
   error: string | null;
   connected: boolean;
@@ -79,6 +101,9 @@ export type SessionState = {
 export const initialSessionState: SessionState = {
   sessionId: null,
   messages: [],
+  extensionRequests: [],
+  extensionStatus: {},
+  extensionNotice: null,
   status: 'idle',
   error: null,
   connected: false,
