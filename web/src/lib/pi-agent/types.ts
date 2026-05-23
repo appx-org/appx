@@ -1,6 +1,7 @@
 export type Role = 'user' | 'assistant' | 'system' | 'tool' | 'toolResult';
 
 export type TextContent = { type: 'text'; text: string };
+export type ThinkingContent = { type: 'thinking'; thinking?: string; text?: string; redacted?: boolean };
 export type ToolCallContent = {
   type: 'tool_call' | 'toolCall' | 'tool_use';
   toolCallId?: string;
@@ -11,7 +12,7 @@ export type ToolCallContent = {
   arguments?: unknown;
   input?: unknown;
 };
-export type MessageContent = TextContent | ToolCallContent | Record<string, unknown>;
+export type MessageContent = TextContent | ThinkingContent | ToolCallContent | Record<string, unknown>;
 
 export type AgentMessage = {
   role: Role;
@@ -19,11 +20,21 @@ export type AgentMessage = {
   timestamp: string | number;
 };
 
+export type AssistantMessagePartial = { content?: MessageContent[] };
+
 export type AssistantMessageEvent =
-  | { type: 'text_delta'; contentIndex: number; delta: string; partial: string }
-  | { type: 'tool_call_start'; toolCallId: string; toolName: string }
-  | { type: 'tool_call_args_delta'; toolCallId: string; delta: string }
-  | { type: 'tool_call_end'; toolCallId: string };
+  | { type: 'text_start'; contentIndex: number; partial?: AssistantMessagePartial }
+  | { type: 'text_delta'; contentIndex: number; delta: string; partial?: AssistantMessagePartial }
+  | { type: 'text_end'; contentIndex: number; content: string; partial?: AssistantMessagePartial }
+  | { type: 'thinking_start'; contentIndex: number; partial?: AssistantMessagePartial }
+  | { type: 'thinking_delta'; contentIndex: number; delta: string; partial?: AssistantMessagePartial }
+  | { type: 'thinking_end'; contentIndex: number; content?: string; partial?: AssistantMessagePartial }
+  | { type: 'toolcall_start'; contentIndex: number; partial?: AssistantMessagePartial }
+  | { type: 'toolcall_delta'; contentIndex: number; delta: string; partial?: AssistantMessagePartial }
+  | { type: 'toolcall_end'; contentIndex: number; toolCall?: ToolCallContent; partial?: AssistantMessagePartial }
+  | { type: 'tool_call_start'; toolCallId: string; toolName: string; contentIndex?: number }
+  | { type: 'tool_call_args_delta'; toolCallId: string; delta: string; contentIndex?: number }
+  | { type: 'tool_call_end'; toolCallId: string; contentIndex?: number };
 
 export type AgentEvent =
   | { type: 'agent_start' }
@@ -38,11 +49,12 @@ export type AgentEvent =
   | { type: 'agent_end'; messages: AgentMessage[] };
 
 export type UiMessagePart =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; contentIndex?: number }
   | {
       type: 'tool';
       id: string;
       name: string;
+      contentIndex?: number;
       args?: unknown;
       result?: unknown;
       isError?: boolean;
