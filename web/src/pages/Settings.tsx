@@ -36,6 +36,8 @@ type CustomForm = {
   maxTokens: string;
 };
 
+type CredentialMode = 'subscription' | 'api_key';
+
 const defaultCustomForm: CustomForm = {
   provider: 'litellm',
   name: 'LiteLLM',
@@ -94,6 +96,12 @@ function providerSortScore(provider: AgentAuthProvider) {
 function providerTitle(provider: AgentAuthProvider) {
   if (!provider.name || provider.name === provider.provider) return provider.provider;
   return `${provider.name} (${provider.provider})`;
+}
+
+function preferredCredentialMode(provider?: AgentAuthProvider): CredentialMode {
+  if (!provider?.supportsSubscription) return 'api_key';
+  if (provider.credentialType === 'api_key') return 'api_key';
+  return 'subscription';
 }
 
 function isFlowTerminal(flow?: AgentOAuthFlowState | null) {
@@ -201,6 +209,7 @@ export default function Settings() {
   const [subscriptionFlow, setSubscriptionFlow] = useState<AgentOAuthFlowState | null>(null);
   const [subscriptionInput, setSubscriptionInput] = useState('');
   const [subscriptionFallbackOpen, setSubscriptionFallbackOpen] = useState(false);
+  const [credentialMode, setCredentialMode] = useState<CredentialMode>('api_key');
   const [customEditorOpen, setCustomEditorOpen] = useState(false);
   const [customForm, setCustomForm] = useState<CustomForm>(defaultCustomForm);
   const [saving, setSaving] = useState(false);
@@ -227,6 +236,8 @@ export default function Settings() {
   const selectedSupportsSubscription = selected?.supportsSubscription ?? false;
   const canRemoveSelected = selected?.source === 'stored' || selected?.credentialType === 'oauth';
   const subscriptionActive = Boolean(subscriptionFlow && !isFlowTerminal(subscriptionFlow));
+  const showApiKeyControls = selectedSupportsKey && (!selectedSupportsSubscription || credentialMode === 'api_key');
+  const showSubscriptionControls = selectedSupportsSubscription && credentialMode === 'subscription';
 
   const clearMessages = () => {
     setError('');
@@ -303,9 +314,31 @@ export default function Settings() {
     return () => window.clearInterval(timer);
   }, [loadPiAuth, subscriptionFlow]);
 
+  useEffect(() => {
+    setCredentialMode(preferredCredentialMode(selected));
+  }, [selectedProvider, selected?.supportsSubscription, selected?.credentialType]);
+
   const handleProviderSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     chooseProvider(event.target.value);
     event.currentTarget.blur();
+  };
+
+  const handleCredentialModeChange = async (mode: CredentialMode) => {
+    setCredentialMode(mode);
+    setNewKey('');
+    setSubscriptionInput('');
+    setSubscriptionFallbackOpen(false);
+    if (mode === 'api_key' && subscriptionFlow && !isFlowTerminal(subscriptionFlow)) {
+      setSubscriptionBusy(true);
+      try {
+        await cancelAgentSubscriptionFlow(subscriptionFlow.id);
+      } catch {
+        // Best-effort cleanup; switching modes should still keep the UI moving.
+      } finally {
+        setSubscriptionBusy(false);
+      }
+    }
+    if (mode === 'api_key') setSubscriptionFlow(null);
   };
 
   const handleOpenCodeSave = async () => {
@@ -577,9 +610,9 @@ export default function Settings() {
               {error && <div style={styles.error}>{error}</div>}
               {success && <div style={styles.successMsg}>{success}</div>}
 
-              <div style={styles.inputRow}>
+              <div style={styles.providerControlRow}>
                 <select
-                  style={styles.select}
+                  style={{ ...styles.select, ...styles.providerSelect }}
                   value={selectedProvider}
                   onChange={handleProviderSelect}
                   disabled={loadingProviders || sortedProviders.length === 0}
@@ -590,24 +623,52 @@ export default function Settings() {
                     </option>
                   ))}
                 </select>
-                <input
-                  style={styles.input}
-                  type="password"
-                  placeholder={selected ? `${selected.name || selected.provider} API key` : 'Provider API key'}
-                  value={newKey}
-                  onChange={(event) => setNewKey(event.target.value)}
-                  onKeyDown={(event) => event.key === 'Enter' && handlePiSave()}
-                  disabled={!selectedSupportsKey}
-                />
-                <button
-                  data-btn="primary"
-                  style={styles.saveBtn}
-                  onClick={handlePiSave}
-                  disabled={saving || !selectedProvider || !newKey.trim() || !selectedSupportsKey}
-                >
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
+                {selectedSupportsSubscription && (
+                  <div style={styles.modeToggle} role="group" aria-label="Credential mode">
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.modeBtn,
+                        ...(credentialMode === 'subscription' ? styles.modeBtnActive : {}),
+                      }}
+                      onClick={() => void handleCredentialModeChange('subscription')}
+                    >
+                      Subscription
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.modeBtn,
+                        ...(credentialMode === 'api_key' ? styles.modeBtnActive : {}),
+                      }}
+                      onClick={() => void handleCredentialModeChange('api_key')}
+                    >
+                      API key
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {showApiKeyControls && (
+                <div style={styles.keyRow}>
+                  <input
+                    style={styles.input}
+                    type="password"
+                    placeholder={selected ? `${selected.name || selected.provider} API key` : 'Provider API key'}
+                    value={newKey}
+                    onChange={(event) => setNewKey(event.target.value)}
+                    onKeyDown={(event) => event.key === 'Enter' && handlePiSave()}
+                  />
+                  <button
+                    data-btn="primary"
+                    style={styles.saveBtn}
+                    onClick={handlePiSave}
+                    disabled={saving || !selectedProvider || !newKey.trim()}
+                  >
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              )}
 
               {selected && (
                 <div style={styles.providerMeta}>
@@ -621,28 +682,32 @@ export default function Settings() {
                 </div>
               )}
 
-              <div style={styles.actionRow}>
-                <button
-                  data-btn="outline-green"
-                  style={styles.outlineBtn}
-                  onClick={handleStartSubscription}
-                  disabled={!selectedSupportsSubscription || subscriptionBusy || subscriptionActive || !selectedProvider}
-                >
-                  {subscriptionBusy ? 'Working...' : subscriptionActive ? 'Login in progress' : 'Subscription Login'}
-                </button>
-                {canRemoveSelected && (
-                  <button
-                    data-btn="text-red"
-                    style={styles.removeBtn}
-                    onClick={handlePiDelete}
-                    disabled={saving}
-                  >
-                    Remove credential
-                  </button>
-                )}
-              </div>
+              {(showSubscriptionControls || canRemoveSelected) && (
+                <div style={styles.actionRow}>
+                  {showSubscriptionControls && (
+                    <button
+                      data-btn="outline-green"
+                      style={styles.outlineBtn}
+                      onClick={handleStartSubscription}
+                      disabled={subscriptionBusy || subscriptionActive || !selectedProvider}
+                    >
+                      {subscriptionBusy ? 'Working...' : subscriptionActive ? 'Login in progress' : 'Subscription Login'}
+                    </button>
+                  )}
+                  {canRemoveSelected && (
+                    <button
+                      data-btn="text-red"
+                      style={styles.removeBtn}
+                      onClick={handlePiDelete}
+                      disabled={saving}
+                    >
+                      Remove credential
+                    </button>
+                  )}
+                </div>
+              )}
 
-              {subscriptionFlow && (
+              {showSubscriptionControls && subscriptionFlow && (
                 <div style={styles.flowPanel}>
                   <div style={styles.flowHeader}>
                     <div style={styles.flowTitleGroup}>
@@ -1116,6 +1181,47 @@ const styles: Record<string, CSSProperties> = {
     gridTemplateColumns: 'minmax(180px, 240px) minmax(0, 1fr) auto',
     gap: 8,
     marginBottom: 12,
+  },
+  providerControlRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  providerSelect: {
+    flex: '1 1 280px',
+    maxWidth: 420,
+  },
+  keyRow: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gap: 8,
+    marginBottom: 12,
+  },
+  modeToggle: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 2,
+    padding: 2,
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+  },
+  modeBtn: {
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 3,
+    color: 'var(--muted)',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 500,
+    padding: '6px 10px',
+    whiteSpace: 'nowrap',
+  },
+  modeBtnActive: {
+    background: 'rgba(95, 211, 255, 0.12)',
+    color: 'var(--cyan)',
   },
   select: {
     minWidth: 0,
