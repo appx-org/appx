@@ -13,13 +13,20 @@ Browser
   └── HTTPS (single port)
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
+        ├── /api/projects/:id/agent/* → Pi agent-server project session proxy
+        ├── /api/agent/*    → Pi agent-server shared auth/model proxy
         ├── /api/opencode/* Legacy reverse proxy → OpenCode server
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
-Everything is a single Go binary. The React frontend is compiled and embedded at build time. State lives in a SQLite database on disk.
+Appx itself is a single Go binary. The React frontend is compiled and embedded
+at build time. State lives in a SQLite database on disk.
 
-Pi is installed as the default agent runtime. Legacy OpenCode mode runs OpenCode as a separate process on `localhost:4096`; Appx proxies requests to it and adds auth + TLS on top.
+Pi is installed as the default agent runtime. In Pi mode, systemd runs
+`agent-server` on `localhost:4001` with `AGENT_SERVER_MODE=multi`, so Appx can
+share credentials while keeping sessions scoped to one project. Legacy OpenCode
+mode runs OpenCode as a separate process on `localhost:4096`; Appx proxies
+requests to it and adds auth + TLS on top.
 
 **Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
 
@@ -144,8 +151,9 @@ Checks users, permissions, isolation, tools, service files, and runtime. Exits 0
 ### Troubleshoot
 
 ```bash
-journalctl -u appx -f          # appx logs
-journalctl -u opencode -f      # opencode logs
+journalctl -u appx -f            # appx logs
+journalctl -u agent-server -f    # Pi agent-server logs
+journalctl -u opencode -f        # legacy OpenCode logs
 ```
 
 ### Deploy scripts
@@ -155,12 +163,24 @@ journalctl -u opencode -f      # opencode logs
 | `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
 | `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, agent config    |
 | `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Pi, optional OpenCode, Claude Code, uv     |
+| `deploy/agent-server.service`   | Pi backend       | Systemd unit for project-scoped Pi session service         |
 | `deploy/opencode.json`          | Model changes    | Default OpenCode model config for legacy mode              |
 | `deploy/opencode-version`       | Version pin      | Pinned OpenCode version for legacy mode                    |
 | `deploy/pi-version`             | Version pin      | Pinned Pi version installed by tools-install               |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
 
 ## Local development
+
+For Pi mode, run the sibling `agent-server` in multi-project mode before
+starting appx:
+
+```bash
+cd ../agent-server
+PROJECT_DIR=/path/to/appx-data/projects \
+AGENT_SERVER_MODE=multi \
+AGENT_SERVER_PORT=4001 \
+npm run dev
+```
 
 For legacy OpenCode mode, OpenCode must be running before starting appx:
 

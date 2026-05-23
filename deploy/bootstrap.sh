@@ -174,7 +174,7 @@ STEP="restart-services"
 APPX_AGENT_BACKEND=$(grep '^APPX_AGENT_BACKEND=' "$ENV_FILE" | cut -d= -f2- || true)
 APPX_AGENT_BACKEND="${APPX_AGENT_BACKEND:-pi}"
 echo "stopping services..."
-systemctl stop opencode appx 2>/dev/null || true
+systemctl stop agent-server opencode appx 2>/dev/null || true
 sleep 2
 echo "starting services..."
 if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
@@ -185,7 +185,12 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
     sleep 2
   done
 else
-  systemctl start appx
+  systemctl start agent-server appx
+  echo "waiting for agent-server to be ready..."
+  for i in $(seq 1 10); do
+    curl -sf http://127.0.0.1:4001/v1/healthz >/dev/null 2>&1 && break
+    sleep 2
+  done
 fi
 echo "services started"
 
@@ -218,5 +223,5 @@ if [ -n "$APPX_HOST_VAL" ]; then
     echo "  Visit: https://${APPX_HOST_VAL}:${APPX_PORT_VAL}"
   fi
 fi
-echo "  Log in and set your Anthropic API key in Settings."
+echo "  Open Settings to configure Pi credentials and models."
 echo "========================================"

@@ -179,8 +179,15 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   expect_ok "opencode service enabled"     systemctl is-enabled opencode
   expect_ok "opencode ExecStart is /usr/local/bin" \
     grep -q "ExecStart=/usr/local/bin/opencode" /etc/systemd/system/opencode.service
+  expect_deny "agent-server.service absent for opencode backend" test -f /etc/systemd/system/agent-server.service
 else
   expect_deny "opencode.service absent for pi backend" test -f /etc/systemd/system/opencode.service
+  expect_ok "agent-server.service exists"      test -f /etc/systemd/system/agent-server.service
+  expect_ok "agent-server service enabled"     systemctl is-enabled agent-server
+  expect_ok "agent-server mode is multi" \
+    grep -q "AGENT_SERVER_MODE=multi" /etc/systemd/system/agent-server.service
+  expect_ok "agent-server ExecStart is /usr/local/bin" \
+    grep -q "ExecStart=/usr/local/bin/agent-server" /etc/systemd/system/agent-server.service
 fi
 expect_ok "appx ExecStart is /usr/local/bin" \
   grep -q "ExecStart=/usr/local/bin/appx" /etc/systemd/system/appx.service
@@ -189,6 +196,9 @@ expect_ok "appx runs as appx user" \
 if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   expect_ok "opencode runs as opencode user" \
     grep -q "User=opencode" /etc/systemd/system/opencode.service
+else
+  expect_ok "agent-server runs as opencode user" \
+    grep -q "User=opencode" /etc/systemd/system/agent-server.service
 fi
 
 # ---------------------------------------------------------------------------
@@ -207,6 +217,7 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   expect_ok "opencode binary in /usr/local/bin" test -x /usr/local/bin/opencode
 else
   echo "  INFO  opencode binary not required for pi backend"
+  expect_ok "agent-server binary in /usr/local/bin" test -x /usr/local/bin/agent-server
 fi
 expect_ok "pi binary in /usr/local/bin"       test -x /usr/local/bin/pi
 expect_ok "uv binary in /usr/local/bin"       test -x /usr/local/bin/uv
@@ -260,6 +271,18 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   fi
 else
   expect_deny "opencode service inactive in pi backend" systemctl is-active opencode
+  if systemctl is-active --quiet agent-server 2>/dev/null; then
+    expect_ok "agent-server is running"    systemctl is-active agent-server
+    expect_ok "agent-server responds on :4001" \
+      curl -sf --max-time 3 http://127.0.0.1:4001/v1/healthz
+    AS_PID=$(systemctl show agent-server --property=MainPID --value 2>/dev/null)
+    if [ -n "$AS_PID" ] && [ "$AS_PID" != "0" ]; then
+      AS_USER=$(ps -o user= -p "$AS_PID" 2>/dev/null || echo "unknown")
+      expect_eq "agent-server process runs as opencode user" "$AS_USER" "opencode"
+    fi
+  else
+    echo "  SKIP  agent-server not running (start with: systemctl start agent-server)"
+  fi
 fi
 
 if systemctl is-active --quiet appx 2>/dev/null; then

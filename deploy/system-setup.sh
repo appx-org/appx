@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # deploy/system-setup.sh — create OS users, groups, directories, and install
-# systemd service files for appx and opencode.
+# systemd service files for appx plus the selected agent backend.
 #
 # Must be run as root. Safe to run multiple times (idempotent).
 #
@@ -166,12 +166,16 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   # the resolved path into the service file before installing it.
   sed "s|WorkingDirectory=.*|WorkingDirectory=$DATA_DIR/projects|" \
     "$SCRIPT_DIR/opencode.service" > /etc/systemd/system/opencode.service
+  systemctl disable --now agent-server 2>/dev/null || true
+  rm -f /etc/systemd/system/agent-server.service
   echo "copied service files to /etc/systemd/system/"
   echo "opencode WorkingDirectory → $DATA_DIR/projects"
 else
   systemctl disable --now opencode 2>/dev/null || true
   rm -f /etc/systemd/system/opencode.service
-  echo "copied appx.service; opencode.service disabled for $APPX_AGENT_BACKEND backend"
+  sed "s|__APPX_PROJECTS_DIR__|$DATA_DIR/projects|g" \
+    "$SCRIPT_DIR/agent-server.service" > /etc/systemd/system/agent-server.service
+  echo "copied appx.service and agent-server.service; opencode.service disabled for $APPX_AGENT_BACKEND backend"
 fi
 
 systemctl daemon-reload
@@ -181,8 +185,8 @@ if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
   systemctl enable appx opencode
   echo "services enabled: appx, opencode"
 else
-  systemctl enable appx
-  echo "services enabled: appx"
+  systemctl enable appx agent-server
+  echo "services enabled: appx, agent-server"
 fi
 
 # ---------------------------------------------------------------------------

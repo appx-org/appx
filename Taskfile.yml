@@ -71,7 +71,7 @@ tasks:
           sudo systemctl restart opencode appx
         else
           sudo systemctl stop opencode 2>/dev/null || true
-          sudo systemctl restart appx
+          sudo systemctl restart agent-server appx
         fi
       - sudo ./deploy/verify-installation.sh
 
