@@ -6,13 +6,12 @@ import {
   logout,
   type Project as ProjectType,
 } from '../api/client';
-import { SessionList, ChatPanel } from '../components/agent';
 import PiAgentPane from '../components/pi-agent/PiAgentPane';
 import Terminal from '../components/Terminal';
 
 /** Project is the full-page project view with tabbed Agent/Terminal interface.
- *  The Agent tab uses the configured agent backend. The Terminal tab is a
- *  local PTY rooted in the project directory. */
+ *  The Agent tab uses Pi. The Terminal tab is a local PTY rooted in the
+ *  project directory. */
 export default function Project() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -21,9 +20,7 @@ export default function Project() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'agent' | 'terminal'>('agent');
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [baseDomain, setBaseDomain] = useState('localhost');
-  const [agentBackend, setAgentBackend] = useState<'opencode' | 'pi'>('opencode');
 
   const fetchProject = useCallback(async () => {
     if (!id) return;
@@ -47,7 +44,6 @@ export default function Project() {
     getServerConfig()
       .then((cfg) => {
         setBaseDomain(cfg.baseDomain || 'localhost');
-        setAgentBackend(cfg.agentBackend || 'opencode');
       })
       .catch(() => {});
   }, [fetchProject]);
@@ -114,24 +110,7 @@ export default function Project() {
 
       <div style={styles.main}>
         {activeTab === 'agent' ? (
-          agentBackend === 'pi' ? (
-            <PiAgentPane projectId={project.id} />
-          ) : (
-            <div style={styles.agentLayout}>
-              <SessionList
-                projectDir={projectDir}
-                activeSessionId={activeSessionId}
-                onSelectSession={setActiveSessionId}
-              />
-              {activeSessionId ? (
-                <ChatPanel sessionId={activeSessionId} projectDir={projectDir} />
-              ) : (
-                <div style={styles.centered}>
-                  <span style={styles.statusLabel}>Select or create a session</span>
-                </div>
-              )}
-            </div>
-          )
+          <PiAgentPane projectId={project.id} />
         ) : (
           <Terminal cwd={projectDir} />
         )}
@@ -156,7 +135,6 @@ const styles: Record<string, React.CSSProperties> = {
   tab: { padding: '6px 16px', cursor: 'pointer', border: '1px solid transparent', borderRadius: 4, fontSize: 13, color: 'var(--muted)', background: 'transparent' },
   tabActive: { padding: '6px 16px', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, color: 'var(--text)', background: 'var(--surface)' },
   main: { flex: 1, display: 'flex', minHeight: 0 },
-  agentLayout: { flex: 1, display: 'flex', minHeight: 0 },
   centered: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 },
   statusLabel: { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--muted)', letterSpacing: '0.04em' },
   errorText: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--red)', maxWidth: 400, textAlign: 'center' as const, lineHeight: 1.5 },

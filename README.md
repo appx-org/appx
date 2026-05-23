@@ -1,6 +1,6 @@
 # Appx
 
-Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents. New installs default to Pi; the legacy OpenCode backend remains available with `APPX_AGENT_BACKEND=opencode`.
+Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents powered by Pi.
 
 ## What it does
 
@@ -15,7 +15,6 @@ Browser
         ├── /api/*         REST API (auth, projects, settings)
         ├── /api/projects/:id/agent/* → Pi agent-server project session proxy
         ├── /api/agent/*    → Pi agent-server shared auth/model proxy
-        ├── /api/opencode/* Legacy reverse proxy → OpenCode server
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
@@ -24,9 +23,7 @@ at build time. State lives in a SQLite database on disk.
 
 Pi is installed as the default agent runtime. In Pi mode, systemd runs
 `agent-server` on `localhost:4001` with `AGENT_SERVER_MODE=multi`, so Appx can
-share credentials while keeping sessions scoped to one project. Legacy OpenCode
-mode runs OpenCode as a separate process on `localhost:4096`; Appx proxies
-requests to it and adds auth + TLS on top.
+share credentials while keeping sessions scoped to one project.
 
 **Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
 
@@ -88,7 +85,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite. In Pi mode the Appx UI proxies project agent sessions to project-scoped `agent-server` runtimes and proxies provider-auth, subscription login, and custom-provider requests to shared Pi agent settings at `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`). The Pi agent service runs with `NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://127.0.0.1:9080`, and `NO_PROXY=localhost,127.0.0.1`, so provider traffic goes through the Appx egress allowlist while local agent traffic stays on loopback.
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and agent-server), sets up systemd services, starts everything, and runs a verification suite. The Appx UI proxies project agent sessions to project-scoped `agent-server` runtimes and proxies provider-auth, subscription login, and custom-provider requests to shared Pi agent settings at `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`). The Pi agent service runs with `NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://127.0.0.1:9080`, and `NO_PROXY=localhost,127.0.0.1`, so provider traffic goes through the Appx egress allowlist while local agent traffic stays on loopback.
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
@@ -100,7 +97,6 @@ Bootstrap installs these tools system-wide so agents can use them in the termina
 - **uv** — Python version and package management (self-update: `uv self update`)
 - **Pi** — AI coding agent CLI/SDK (pinned version in `deploy/pi-version`)
 - **agent-server** — separate Appx org service that exposes Pi sessions over HTTP/SSE for the Agent tab
-- **OpenCode** — optional legacy AI agent backend when `APPX_AGENT_BACKEND=opencode` (pinned version in `deploy/opencode-version`)
 - **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
 
 ### Updating appx
@@ -112,16 +108,7 @@ cd /srv/appx
 task server:deploy
 ```
 
-Pulls latest code, rebuilds, installs the binary, updates the active backend tools to the pinned versions, and restarts the needed services.
-
-### Updating OpenCode version
-
-Edit `deploy/opencode-version` to the new version, then:
-
-```bash
-cd /srv/appx
-task server:deploy
-```
+Pulls latest code, rebuilds, installs the binary, updates Pi/agent-server to the pinned versions, and restarts the needed services.
 
 ### Updating Pi version
 
@@ -153,7 +140,6 @@ Checks users, permissions, isolation, tools, service files, and runtime. Exits 0
 ```bash
 journalctl -u appx -f            # appx logs
 journalctl -u agent-server -f    # Pi agent-server logs
-journalctl -u opencode -f        # legacy OpenCode logs
 ```
 
 ### Deploy scripts
@@ -162,17 +148,14 @@ journalctl -u opencode -f        # legacy OpenCode logs
 | ------------------------------- | ---------------- | ---------------------------------------------------------- |
 | `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
 | `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, agent config    |
-| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Pi, optional OpenCode, Claude Code, uv     |
+| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Pi, agent-server, Claude Code, uv          |
 | `deploy/agent-server.service`   | Pi backend       | Systemd unit for project-scoped Pi session service         |
-| `deploy/opencode.json`          | Model changes    | Default OpenCode model config for legacy mode              |
-| `deploy/opencode-version`       | Version pin      | Pinned OpenCode version for legacy mode                    |
 | `deploy/pi-version`             | Version pin      | Pinned Pi version installed by tools-install               |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
 
 ## Local development
 
-For Pi mode, run the sibling `agent-server` in multi-project mode before
-starting appx:
+Run the sibling `agent-server` in multi-project mode before starting appx:
 
 ```bash
 cd ../agent-server
@@ -180,12 +163,6 @@ PROJECT_DIR=/path/to/appx-data/projects \
 AGENT_SERVER_MODE=multi \
 AGENT_SERVER_PORT=4001 \
 npm run dev
-```
-
-For legacy OpenCode mode, OpenCode must be running before starting appx:
-
-```bash
-opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
 Then start appx with `--host 127.0.0.1.sslip.io` so that subdomain routing and session cookies work correctly across project subdomains. Plain `localhost` has inconsistent cookie-sharing behaviour for subdomains across browsers.
@@ -281,7 +258,7 @@ Bootstrap creates two OS users with a shared `projects` group:
 
 ```
 appx      — runs the appx server, owns DB and TLS certs
-opencode  — isolated agent user for Pi tooling and legacy OpenCode, cannot access appx data
+appx-agent — isolated agent user for Pi tooling, cannot access appx data
 projects  — shared group, both users read/write project directories
 ```
 

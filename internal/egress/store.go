@@ -1,6 +1,6 @@
 // Package egress implements the egress CONNECT proxy, allowlist management, and
-// connection logging. It controls which external hosts the opencode agent can
-// reach by intercepting HTTP CONNECT requests on 127.0.0.1:9080.
+// connection logging. It controls which external hosts the Pi agent can reach by
+// intercepting HTTP CONNECT requests on 127.0.0.1:9080.
 package egress
 
 import (
@@ -13,12 +13,12 @@ import (
 
 // DefaultAllowlist is the set of host:port entries permitted when no custom
 // allowlist has been configured. Contains the minimum set required for basic
-// agent functionality: Claude API, OpenCode's own API, and common package
-// registries agents use to build projects.
+// agent functionality: model provider APIs and common package registries agents
+// use to build projects.
 var DefaultAllowlist = []string{
 	// AI / agent infrastructure
 	"api.anthropic.com:443",
-	"opencode.ai:443",
+	"api.openai.com:443",
 	// Go modules
 	"proxy.golang.org:443",
 	"sum.golang.org:443",

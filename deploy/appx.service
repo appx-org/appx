@@ -13,7 +13,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 # Ensure directories created by appx (project subdirs) have group-write so the
-# opencode user can write files via the shared projects group.
+# agent service user can write files via the shared projects group.
 UMask=0007
 
 # Server-specific config lives in /etc/appx/appx.env (created by bootstrap).

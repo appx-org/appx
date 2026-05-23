@@ -1,10 +1,7 @@
 package server
 
 import (
-	"bufio"
-	"crypto/sha1"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,7 +15,6 @@ import (
 
 	"github.com/neuromaxer/appx/internal/auth"
 	"github.com/neuromaxer/appx/internal/egress"
-	"github.com/neuromaxer/appx/internal/opencode"
 	"github.com/neuromaxer/appx/internal/project"
 	"github.com/neuromaxer/appx/internal/terminal"
 	"golang.org/x/crypto/bcrypt"
@@ -26,9 +22,8 @@ import (
 )
 
 // testSchema is the minimal in-memory SQLite schema used by all server tests.
-// It includes the new assigned_port and opencode_project_id columns added in
-// migration 4, omitting legacy Docker columns that are no longer read by any
-// handler.
+// It includes the project columns read by handlers while omitting legacy Docker
+// columns that are no longer used.
 const testSchema = `
 	CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 	CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME);
@@ -37,7 +32,6 @@ const testSchema = `
 		name TEXT UNIQUE NOT NULL,
 		status TEXT DEFAULT 'stopped',
 		assigned_port INTEGER,
-		opencode_project_id TEXT,
 		last_error TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -80,7 +74,7 @@ func setupTest(t *testing.T) (http.Handler, *auth.Store, *sql.DB) {
 		"assets/index-abc.js": {Data: []byte("console.log('hi')")},
 	}
 
-	return NewRouter(a, pm, webFS, RouterConfig{}, nil, es, nil, terminal.NewLocalManager(65536)), store, db
+	return NewRouter(a, pm, webFS, RouterConfig{}, es, nil, terminal.NewLocalManager(65536)), store, db
 }
 
 // setupTestWithHTTPMode creates a test handler configured for HTTP dev mode
@@ -125,7 +119,7 @@ func setupTestWithConfig(t *testing.T, rcfg RouterConfig) (http.Handler, *auth.S
 		"assets/index-abc.js": {Data: []byte("console.log('hi')")},
 	}
 
-	return NewRouter(a, pm, webFS, rcfg, nil, es, nil, terminal.NewLocalManager(65536)), store, db
+	return NewRouter(a, pm, webFS, rcfg, es, nil, terminal.NewLocalManager(65536)), store, db
 }
 
 // authedRequest creates an HTTP request with a valid session cookie.
@@ -569,98 +563,14 @@ func TestDeleteProject_NotFound(t *testing.T) {
 
 // --- Settings endpoint tests ---
 
-func TestGetAPIKeyStatus(t *testing.T) {
-	handler, store, _ := setupTest(t)
-
-	req := authedRequest(t, store, "GET", "/api/settings/api-key", "")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]bool
-	json.NewDecoder(w.Body).Decode(&resp)
-	// No key set yet — should be false.
-	if resp["set"] {
-		t.Error("expected set=false for fresh store, got true")
-	}
-}
-
-func TestSetAPIKey(t *testing.T) {
-	handler, store, _ := setupTest(t)
-
-	req := authedRequest(t, store, "PUT", "/api/settings/api-key", `{"key":"sk-ant-new-key"}`)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Verify it was stored in the DB.
-	val, err := store.GetSetting("anthropic_api_key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if val != "sk-ant-new-key" {
-		t.Errorf("expected stored key, got %q", val)
-	}
-}
-
-func TestSetAPIKey_EmptyKey(t *testing.T) {
-	handler, store, _ := setupTest(t)
-
-	req := authedRequest(t, store, "PUT", "/api/settings/api-key", `{"key":""}`)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestDeleteAPIKey(t *testing.T) {
-	handler, store, _ := setupTest(t)
-
-	// Set a key first.
-	req := authedRequest(t, store, "PUT", "/api/settings/api-key", `{"key":"sk-ant-test"}`)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("set: expected 200, got %d", w.Code)
-	}
-
-	// Delete it.
-	req = authedRequest(t, store, "DELETE", "/api/settings/api-key", "")
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Verify key status is now false.
-	req = authedRequest(t, store, "GET", "/api/settings/api-key", "")
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	var resp map[string]bool
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["set"] {
-		t.Error("expected set=false after delete")
-	}
-}
-
 func TestSettingsEndpoints_NoAuth(t *testing.T) {
 	handler, _, _ := setupTest(t)
 
-	req := httptest.NewRequest("GET", "/api/settings/api-key", nil)
+	req := httptest.NewRequest("GET", "/api/settings/terminal-buffer-size", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
-		t.Errorf("GET /api/settings/api-key: expected 401, got %d", w.Code)
+		t.Errorf("GET /api/settings/terminal-buffer-size: expected 401, got %d", w.Code)
 	}
 }
 
@@ -896,80 +806,6 @@ func TestDashboardRouteHasStrictCSP(t *testing.T) {
 	}
 }
 
-// setupTestWithOpenCodeBackend creates a test handler configured to proxy
-// /api/opencode/* requests to the given openCodeURL backend.
-func setupTestWithOpenCodeBackend(t *testing.T, openCodeURL string) (http.Handler, *auth.Store, *sql.DB) {
-	t.Helper()
-	rcfg := RouterConfig{OpenCodeURL: openCodeURL}
-	return setupTestWithConfig(t, rcfg)
-}
-
-func TestOpenCodeProxy_RequiresAuth(t *testing.T) {
-	handler, _, _ := setupTest(t)
-
-	req := httptest.NewRequest("GET", "/api/opencode/session", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", w.Code)
-	}
-}
-
-func TestOpenCodeProxy_Authed_ForwardsRequest(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"path":   r.URL.Path,
-			"method": r.Method,
-		})
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithOpenCodeBackend(t, backend.URL)
-
-	req := authedRequest(t, store, "GET", "/api/opencode/session", "")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["path"] != "/session" {
-		t.Errorf("expected path /session after prefix strip, got %q", resp["path"])
-	}
-}
-
-func TestOpenCodeProxy_Authed_PreservesQueryString(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"path":  r.URL.Path,
-			"query": r.URL.RawQuery,
-		})
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithOpenCodeBackend(t, backend.URL)
-
-	req := authedRequest(t, store, "GET", "/api/opencode/session?projectID=abc&limit=10", "")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["query"] != "projectID=abc&limit=10" {
-		t.Errorf("expected query string preserved, got %q", resp["query"])
-	}
-}
-
 // deadlineRecorder wraps httptest.ResponseRecorder and records whether
 // SetWriteDeadline was called with the zero time (meaning "no deadline").
 type deadlineRecorder struct {
@@ -984,28 +820,11 @@ func (r *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func TestOpenCodeProxy_ClearsWriteDeadline(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithOpenCodeBackend(t, backend.URL)
-
-	req := authedRequest(t, store, "GET", "/api/opencode/session", "")
-	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	handler.ServeHTTP(rec, req)
-
-	if !rec.writeDeadlineCleared {
-		t.Error("expected write deadline to be cleared for OpenCode proxy requests (needed for SSE streams)")
-	}
-}
-
 // setupTestWithAgentServerBackend creates a test handler configured to proxy
 // /api/projects/{id}/agent/* requests to the given agent-server URL.
 func setupTestWithAgentServerBackend(t *testing.T, agentServerURL string, token string) (http.Handler, *auth.Store, *sql.DB) {
 	t.Helper()
-	rcfg := RouterConfig{AgentBackend: "pi", AgentServerURL: agentServerURL, AgentServerToken: token}
+	rcfg := RouterConfig{AgentServerURL: agentServerURL, AgentServerToken: token}
 	return setupTestWithConfig(t, rcfg)
 }
 
@@ -1383,91 +1202,6 @@ func TestListProjects_AppRunningField(t *testing.T) {
 	}
 }
 
-func TestOpenCodeHealth_NilClient(t *testing.T) {
-	handler, store, _ := setupTest(t)
-	req := authedRequest(t, store, "GET", "/api/opencode/health", "")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	var resp struct {
-		Healthy bool `json:"healthy"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Healthy {
-		t.Error("expected healthy=false with nil client")
-	}
-}
-
-func TestOpenCodeHealth_RequiresAuth(t *testing.T) {
-	handler, _, _ := setupTest(t)
-	req := httptest.NewRequest("GET", "/api/opencode/health", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rr.Code)
-	}
-}
-
-func TestSetAPIKey_InjectsIntoOpenCode(t *testing.T) {
-	// Start a fake OpenCode server that records the SetAuth call.
-	var gotProviderID, gotAPIKey string
-	fakOC := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// SetAuth uses PUT /auth/:providerID with {type, key} body
-		if strings.HasPrefix(r.URL.Path, "/auth/") && r.Method == http.MethodPut {
-			gotProviderID = strings.TrimPrefix(r.URL.Path, "/auth/")
-			var body struct {
-				Key string `json:"key"`
-			}
-			json.NewDecoder(r.Body).Decode(&body)
-			gotAPIKey = body.Key
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer fakOC.Close()
-
-	// Build a router wired to the fake OpenCode client.
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if _, err = db.Exec(testSchema); err != nil {
-		t.Fatal(err)
-	}
-	store := auth.NewStore(db)
-	store.SetBcryptCost(bcrypt.MinCost)
-	store.SetPassword("testpassword1")
-	a := auth.New(store)
-	ps := project.NewStore(db)
-	pm := project.NewManager(ps, t.TempDir())
-	webFS := fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}}
-
-	oc := opencode.NewClient(fakOC.URL)
-	es := egress.NewStore(db)
-	handler := NewRouter(a, pm, webFS, RouterConfig{}, oc, es, nil, terminal.NewLocalManager(65536))
-
-	// Set the API key via the API.
-	req := authedRequest(t, store, "PUT", "/api/settings/api-key", `{"key":"sk-ant-test123"}`)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if gotProviderID != "anthropic" {
-		t.Errorf("expected providerID 'anthropic', got %q", gotProviderID)
-	}
-	if gotAPIKey != "sk-ant-test123" {
-		t.Errorf("expected apiKey 'sk-ant-test123', got %q", gotAPIKey)
-	}
-}
-
 func TestSubdomainDispatch_NoAppxSecurityHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src *")
@@ -1673,7 +1407,7 @@ func TestPutAllowlist_InvalidFormat(t *testing.T) {
 // --- Config endpoint tests ---
 
 func TestGetConfig_ReturnsRuntimeConfig(t *testing.T) {
-	handler, store, _ := setupTestWithConfig(t, RouterConfig{BaseDomain: "example.com", AgentBackend: "pi"})
+	handler, store, _ := setupTestWithConfig(t, RouterConfig{BaseDomain: "example.com"})
 	req := authedRequest(t, store, "GET", "/api/config", "")
 	req.Host = "example.com"
 	w := httptest.NewRecorder()
@@ -1682,15 +1416,11 @@ func TestGetConfig_ReturnsRuntimeConfig(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp struct {
-		BaseDomain   string `json:"baseDomain"`
-		AgentBackend string `json:"agentBackend"`
+		BaseDomain string `json:"baseDomain"`
 	}
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp.BaseDomain != "example.com" {
 		t.Errorf("expected example.com, got %q", resp.BaseDomain)
-	}
-	if resp.AgentBackend != "pi" {
-		t.Errorf("expected pi, got %q", resp.AgentBackend)
 	}
 }
 
@@ -1901,185 +1631,6 @@ func TestChangePassword_TooShort(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// wsAccept computes the Sec-WebSocket-Accept header value for a given key,
-// per RFC 6455 §4.2.2. Used by the fake WebSocket backend in proxy tests.
-func wsAccept(key string) string {
-	const magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	h := sha1.New()
-	h.Write([]byte(key + magic))
-	return base64.StdEncoding.EncodeToString(h.Sum(nil))
-}
-
-// TestOpenCodeProxy_WebSocketUpgrade verifies that the OpenCode reverse proxy
-// correctly handles WebSocket upgrade requests (HTTP 101 Switching Protocols).
-// It starts a real fake backend that performs a valid WebSocket handshake, then
-// connects to the appx server via a raw TCP connection and checks that the proxy
-// forwards the 101 response back to the client.
-func TestOpenCodeProxy_WebSocketUpgrade(t *testing.T) {
-	var backendUpgraded bool
-
-	// Fake OpenCode backend that accepts WebSocket upgrades.
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-			http.Error(w, "expected websocket upgrade", http.StatusBadRequest)
-			return
-		}
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			http.Error(w, "hijack not supported", http.StatusInternalServerError)
-			return
-		}
-		backendUpgraded = true
-		w.Header().Set("Upgrade", "websocket")
-		w.Header().Set("Connection", "Upgrade")
-		w.Header().Set("Sec-WebSocket-Accept", wsAccept(r.Header.Get("Sec-WebSocket-Key")))
-		w.WriteHeader(http.StatusSwitchingProtocols)
-		conn, _, _ := hj.Hijack()
-		defer conn.Close()
-		// Hold the connection briefly so the proxy can copy the 101 headers.
-		time.Sleep(200 * time.Millisecond)
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithOpenCodeBackend(t, backend.URL)
-
-	// Start a real HTTP server — httptest.NewRecorder does not implement
-	// http.Hijacker, which is required for WebSocket upgrade proxying.
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	token, err := store.CreateSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Dial the appx server directly over TCP so we can send raw HTTP/1.1.
-	addr := strings.TrimPrefix(srv.URL, "http://")
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	const wsKey = "dGhlIHNhbXBsZSBub25jZQ=="
-	fmt.Fprintf(conn,
-		"GET /api/opencode/pty/test-id/connect HTTP/1.1\r\nHost: localhost\r\nCookie: appx_session=%s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n",
-		token, wsKey)
-
-	// Read the HTTP response status line.
-	br := bufio.NewReader(conn)
-	statusLine, err := br.ReadString('\n')
-	if err != nil {
-		t.Fatalf("read status: %v", err)
-	}
-	if !strings.Contains(statusLine, "101") {
-		// Read remaining headers for a better diagnostic.
-		var rest strings.Builder
-		for {
-			line, _ := br.ReadString('\n')
-			rest.WriteString(line)
-			if strings.TrimSpace(line) == "" {
-				break
-			}
-		}
-		t.Errorf("expected 101 Switching Protocols, got: %q\nHeaders:\n%s", statusLine, rest.String())
-	}
-	if !backendUpgraded {
-		t.Error("backend never received WebSocket upgrade request")
-	}
-}
-
-// TestOpenCodeProxy_WebSocketUpgrade_Integration tests WebSocket proxying against
-// a real OpenCode backend. It is skipped unless OPENCODE_URL is set (or OpenCode
-// is running on the default localhost:4096). Run with:
-//
-//	OPENCODE_URL=http://localhost:4096 go test ./internal/server/ -run Integration -v
-//
-// This test creates a real PTY on OpenCode, then opens a WebSocket to it through
-// the appx proxy, and verifies the 101 handshake completes.
-func TestOpenCodeProxy_WebSocketUpgrade_Integration(t *testing.T) {
-	backendURL := "http://localhost:4096"
-
-	// Verify OpenCode is reachable; skip if not.
-	resp, err := http.Get(backendURL + "/health")
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Skip("OpenCode not reachable at localhost:4096 — skipping integration test")
-	}
-	resp.Body.Close()
-
-	handler, store, _ := setupTestWithOpenCodeBackend(t, backendURL)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	token, err := store.CreateSession()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a PTY through the proxy.
-	req, _ := http.NewRequest("POST", srv.URL+"/api/opencode/pty", strings.NewReader("{}"))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cookie", "appx_session="+token)
-	req.Header.Set("x-opencode-directory", "/tmp")
-	client := &http.Client{}
-	ptyResp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("create PTY: %v", err)
-	}
-	defer ptyResp.Body.Close()
-	if ptyResp.StatusCode != http.StatusOK {
-		t.Fatalf("create PTY: expected 200, got %d", ptyResp.StatusCode)
-	}
-	var ptyData struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(ptyResp.Body).Decode(&ptyData); err != nil {
-		t.Fatalf("decode PTY response: %v", err)
-	}
-	if ptyData.ID == "" {
-		t.Fatal("PTY ID is empty")
-	}
-	t.Logf("created PTY: %s", ptyData.ID)
-
-	// Now open a WebSocket to the PTY through the proxy.
-	addr := strings.TrimPrefix(srv.URL, "http://")
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	const wsKey = "dGhlIHNhbXBsZSBub25jZQ=="
-	// Pass directory as query param — browsers cannot set custom headers on
-	// WebSocket connections; the proxy converts ?directory= to the header.
-	fmt.Fprintf(conn,
-		"GET /api/opencode/pty/%s/connect?directory=%s HTTP/1.1\r\nHost: localhost\r\nCookie: appx_session=%s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n",
-		ptyData.ID, "%2Ftmp", token, wsKey)
-
-	br := bufio.NewReader(conn)
-	statusLine, err := br.ReadString('\n')
-	if err != nil {
-		t.Fatalf("read status: %v", err)
-	}
-	if !strings.Contains(statusLine, "101") {
-		var headers strings.Builder
-		for {
-			line, _ := br.ReadString('\n')
-			headers.WriteString(line)
-			if strings.TrimSpace(line) == "" {
-				break
-			}
-		}
-		// Read body (up to 2KB for diagnostics).
-		body := make([]byte, 2048)
-		n, _ := br.Read(body)
-		t.Errorf("expected 101 Switching Protocols, got: %q\nHeaders:\n%s\nBody: %s",
-			statusLine, headers.String(), body[:n])
 	}
 }
 

@@ -89,7 +89,6 @@ else
 #   APPX_HOST   — server hostname for TLS cert and routing (default: <ip>.sslip.io)
 #   APPX_DATA   — data directory: DB, TLS certs, projects (default: /var/lib/appx)
 #   APPX_PORT   — listen port (default: 443). MUST be open in firewall
-#   APPX_AGENT_BACKEND — agent backend: pi or opencode (default: pi)
 #   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
 #   CLOUDFLARE_API_TOKEN — Cloudflare API token for DNS-01 challenge (optional)
@@ -97,7 +96,6 @@ else
 APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
 APPX_PORT=$APPX_PORT
-APPX_AGENT_BACKEND=pi
 APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 # APPX_DOMAIN=
 # CLOUDFLARE_API_TOKEN=
@@ -118,7 +116,7 @@ STEP="system-setup"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 3. Install tools: node, opencode (pinned), claude, uv.
+# 3. Install tools: node, Pi, agent-server, claude, uv.
 # ---------------------------------------------------------------------------
 
 STEP="tools-install"
@@ -171,27 +169,16 @@ echo ""
 # ---------------------------------------------------------------------------
 
 STEP="restart-services"
-APPX_AGENT_BACKEND=$(grep '^APPX_AGENT_BACKEND=' "$ENV_FILE" | cut -d= -f2- || true)
-APPX_AGENT_BACKEND="${APPX_AGENT_BACKEND:-pi}"
 echo "stopping services..."
 systemctl stop agent-server opencode appx 2>/dev/null || true
 sleep 2
 echo "starting services..."
-if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
-  systemctl start opencode appx
-  echo "waiting for OpenCode to be ready..."
-  for i in $(seq 1 10); do
-    curl -sf http://127.0.0.1:4096/health >/dev/null 2>&1 && break
-    sleep 2
-  done
-else
-  systemctl start agent-server appx
-  echo "waiting for agent-server to be ready..."
-  for i in $(seq 1 10); do
-    curl -sf http://127.0.0.1:4001/v1/healthz >/dev/null 2>&1 && break
-    sleep 2
-  done
-fi
+systemctl start agent-server appx
+echo "waiting for agent-server to be ready..."
+for i in $(seq 1 10); do
+  curl -sf http://127.0.0.1:4001/v1/healthz >/dev/null 2>&1 && break
+  sleep 2
+done
 echo "services started"
 
 echo ""

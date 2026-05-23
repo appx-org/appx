@@ -5,15 +5,11 @@ import {
   continueAgentSubscriptionFlow,
   deleteAgentCustomProvider,
   deleteAgentProviderCredential,
-  deleteApiKey,
   getAgentAuthProviders,
   getAgentCustomProviders,
   getAgentSubscriptionFlow,
-  getApiKeyStatus,
-  getServerConfig,
   logout,
   setAgentProviderApiKey,
-  setApiKey,
   startAgentProviderSubscription,
   upsertAgentCustomProvider,
   type AgentAuthProvider,
@@ -200,8 +196,6 @@ function modelFromCustom(provider: AgentCustomProvider): CustomForm {
 /** Settings page for runtime credentials, egress, and account actions. */
 export default function Settings() {
   const navigate = useNavigate();
-  const [agentBackend, setAgentBackend] = useState<'opencode' | 'pi' | null>(null);
-  const [keySet, setKeySet] = useState<boolean | null>(null);
   const [providers, setProviders] = useState<AgentAuthProvider[]>([]);
   const [customProviders, setCustomProviders] = useState<AgentCustomProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('');
@@ -279,16 +273,7 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    getServerConfig()
-      .then(async (cfg) => {
-        setAgentBackend(cfg.agentBackend || 'opencode');
-        if (cfg.agentBackend === 'pi') {
-          await loadPiAuth();
-          return;
-        }
-        const res = await getApiKeyStatus();
-        setKeySet(res.set);
-      })
+    loadPiAuth()
       .catch(() => {
         window.location.href = '/login';
       });
@@ -339,36 +324,6 @@ export default function Settings() {
       }
     }
     if (mode === 'api_key') setSubscriptionFlow(null);
-  };
-
-  const handleOpenCodeSave = async () => {
-    if (!newKey.trim()) return;
-    setSaving(true);
-    clearMessages();
-    try {
-      await setApiKey(newKey.trim());
-      setKeySet(true);
-      setNewKey('');
-      setSuccess('API key saved.');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save key');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleOpenCodeDelete = async () => {
-    setSaving(true);
-    clearMessages();
-    try {
-      await deleteApiKey();
-      setKeySet(false);
-      setSuccess('API key removed.');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to remove key');
-    } finally {
-      setSaving(false);
-    }
   };
 
   const handlePiSave = async () => {
@@ -539,7 +494,6 @@ export default function Settings() {
     }
   };
 
-  const isPi = agentBackend === 'pi';
   const subscriptionInputPlaceholder =
     subscriptionFlow?.status === 'prompt'
       ? subscriptionFlow.prompt?.placeholder || 'Value'
@@ -585,8 +539,6 @@ export default function Settings() {
         </div>
 
         <div style={styles.card}>
-          {isPi ? (
-            <>
               <h3 style={styles.cardTitle}>Agent Credentials</h3>
               <p style={styles.description}>Pi auth for the agent service user.</p>
 
@@ -988,65 +940,6 @@ export default function Settings() {
                   </div>
                 )}
               </div>
-            </>
-          ) : (
-            <>
-              <h3 style={styles.cardTitle}>Legacy OpenCode Anthropic Key</h3>
-              <p style={styles.description}>
-                Used only when <code style={styles.code}>APPX_AGENT_BACKEND=opencode</code>.
-              </p>
-
-              <div style={styles.statusRow}>
-                <span style={styles.statusLabel}>Status</span>
-                {keySet === null ? (
-                  <span style={styles.statusMuted}>Loading...</span>
-                ) : keySet ? (
-                  <span style={{ ...styles.status, color: 'var(--green)' }}>
-                    <span style={{ ...styles.dot, background: 'var(--green)' }} />
-                    Configured
-                  </span>
-                ) : (
-                  <span style={{ ...styles.status, color: 'var(--red)' }}>
-                    <span style={{ ...styles.dot, background: 'var(--red)' }} />
-                    Not set
-                  </span>
-                )}
-              </div>
-
-              {error && <div style={styles.error}>{error}</div>}
-              {success && <div style={styles.successMsg}>{success}</div>}
-
-              <div style={styles.inputRow}>
-                <input
-                  style={styles.input}
-                  type="password"
-                  placeholder="sk-ant-..."
-                  value={newKey}
-                  onChange={(event) => setNewKey(event.target.value)}
-                  onKeyDown={(event) => event.key === 'Enter' && handleOpenCodeSave()}
-                />
-                <button
-                  data-btn="primary"
-                  style={styles.saveBtn}
-                  onClick={handleOpenCodeSave}
-                  disabled={saving || !newKey.trim()}
-                >
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-
-              {keySet && (
-                <button
-                  data-btn="text-red"
-                  style={styles.removeBtn}
-                  onClick={handleOpenCodeDelete}
-                  disabled={saving}
-                >
-                  Remove key
-                </button>
-              )}
-            </>
-          )}
         </div>
 
         <div style={{ ...styles.card, marginTop: 16, cursor: 'pointer' }} onClick={() => navigate('/egress')}>
@@ -1135,14 +1028,6 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.6,
     margin: '0 0 18px',
   },
-  code: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 11,
-    background: 'var(--bg)',
-    padding: '1px 5px',
-    borderRadius: 3,
-    color: 'var(--text)',
-  },
   statusRow: {
     display: 'flex',
     alignItems: 'center',
@@ -1176,12 +1061,6 @@ const styles: Record<string, CSSProperties> = {
     color: 'var(--muted)',
     fontSize: 13,
     minWidth: 0,
-  },
-  inputRow: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(180px, 240px) minmax(0, 1fr) auto',
-    gap: 8,
-    marginBottom: 12,
   },
   providerControlRow: {
     display: 'flex',

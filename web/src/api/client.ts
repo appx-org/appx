@@ -40,7 +40,6 @@ export interface Project {
   status: string;
   assignedPort: number;
   appRunning: boolean;
-  openCodeProjectId?: string;
   lastError?: string;
   createdAt: string;
   projectDir?: string;
@@ -49,7 +48,6 @@ export interface Project {
 /** Server config returned by GET /api/config. */
 export interface ServerConfig {
   baseDomain: string;
-  agentBackend: 'opencode' | 'pi';
 }
 
 /** Fetches server runtime configuration including baseDomain. GET /api/config. */
@@ -87,24 +85,6 @@ export function changePassword(currentPassword: string, newPassword: string) {
     method: 'PUT',
     body: JSON.stringify({ currentPassword, newPassword }),
   });
-}
-
-/** Checks whether an Anthropic API key is configured. */
-export function getApiKeyStatus() {
-  return request<{ set: boolean }>('/settings/api-key');
-}
-
-/** Stores an Anthropic API key. */
-export function setApiKey(key: string) {
-  return request<{ status: string }>('/settings/api-key', {
-    method: 'PUT',
-    body: JSON.stringify({ key }),
-  });
-}
-
-/** Removes the stored Anthropic API key. */
-export function deleteApiKey() {
-  return request<{ status: string }>('/settings/api-key', { method: 'DELETE' });
 }
 
 export interface AgentAuthProvider {
@@ -234,16 +214,6 @@ export function deleteAgentCustomProvider(provider: string) {
   return request<{ ok: true }>(`/agent/custom/providers/${encodeURIComponent(provider)}`, {
     method: 'DELETE',
   });
-}
-
-/** OpenCode server health status. */
-export interface OpenCodeHealth {
-  healthy: boolean;
-}
-
-/** Checks if the OpenCode server is reachable. GET /api/opencode/health. */
-export function getOpenCodeHealth() {
-  return request<OpenCodeHealth>('/opencode/health');
 }
 
 /** A single egress log entry. */

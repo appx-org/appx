@@ -1,8 +1,8 @@
 // Package terminal provides the local PTY manager used by the shell endpoint.
 // This file implements LocalManager, which spawns real OS-level PTY processes
-// using creack/pty — the same primitive used by OpenCode's bun-pty. It shares
-// the ring buffer and pub/sub fan-out patterns from the existing Manager but
-// replaces the Docker exec backend with a direct os/exec + PTY attach.
+// using creack/pty. It shares the ring buffer and pub/sub fan-out patterns from
+// the existing Manager but replaces the Docker exec backend with a direct
+// os/exec + PTY attach.
 package terminal
 
 import (
@@ -28,12 +28,12 @@ type LocalSession struct {
 	// CreatedAt is when the session was started.
 	CreatedAt time.Time
 
-	ptmx      *os.File               // PTY master fd — read=output, write=input
-	cmd       *exec.Cmd              // underlying shell process
-	buf       *RingBuffer            // ring buffer for output replay on reconnect
-	mu        sync.Mutex             // guards subs
+	ptmx      *os.File                 // PTY master fd — read=output, write=input
+	cmd       *exec.Cmd                // underlying shell process
+	buf       *RingBuffer              // ring buffer for output replay on reconnect
+	mu        sync.Mutex               // guards subs
 	subs      map[chan []byte]struct{} // active WebSocket subscribers
-	done      chan struct{}           // closed when the session ends
+	done      chan struct{}            // closed when the session ends
 	closeOnce sync.Once
 }
 

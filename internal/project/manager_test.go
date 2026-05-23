@@ -33,8 +33,7 @@ func setupManagerTest(t *testing.T) (*Manager, *sql.DB) {
 			last_error TEXT,
 			resources TEXT,
 			container_secret TEXT,
-			assigned_port INTEGER,
-			opencode_project_id TEXT
+			assigned_port INTEGER
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_assigned_port ON projects(assigned_port) WHERE assigned_port IS NOT NULL;
 	`)

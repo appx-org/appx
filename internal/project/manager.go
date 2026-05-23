@@ -9,9 +9,8 @@ import (
 )
 
 // agentsTemplate is the root AGENTS.md content scaffolded into every new
-// project directory for the legacy OpenCode runtime. The Pi runtime reads the
-// richer project-local harness at .pi/AGENTS.md; keep this root file small and
-// compatible with both runtimes.
+// project directory. The Pi runtime also reads the richer project-local harness
+// at .pi/AGENTS.md, so this file stays as a short workspace orientation note.
 const agentsTemplate = `# Project: {{name}}
 
 ## App Port
@@ -39,8 +38,7 @@ type Manager struct {
 
 // NewManager creates a Manager backed by the given project store. The projectRoot
 // is the base directory where project subdirectories are created. It is resolved
-// to an absolute path so that ProjectDir returns paths that match what OpenCode
-// stores internally (OpenCode resolves symlinks and relative paths).
+// to an absolute path so ProjectDir always returns a stable host path.
 func NewManager(store *Store, projectRoot string) *Manager {
 	abs, err := filepath.Abs(projectRoot)
 	if err == nil {
@@ -54,8 +52,8 @@ func NewManager(store *Store, projectRoot string) *Manager {
 
 // Create creates a new project: inserts a DB record with an auto-assigned port,
 // creates the project directory, scaffolds AGENTS.md, runs git init, stages all
-// files, and makes an initial commit. The git repo is required for OpenCode to
-// discover the project. If filesystem operations fail, the DB record is rolled back.
+// files, and makes an initial commit. If filesystem operations fail, the DB
+// record is rolled back.
 func (m *Manager) Create(name string) (*Project, error) {
 	proj, err := m.Store.Create(name)
 	if err != nil {

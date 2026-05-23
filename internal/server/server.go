@@ -19,7 +19,6 @@ import (
 	"github.com/libdns/cloudflare"
 	"github.com/neuromaxer/appx/internal/auth"
 	"github.com/neuromaxer/appx/internal/egress"
-	"github.com/neuromaxer/appx/internal/opencode"
 	"github.com/neuromaxer/appx/internal/project"
 	"github.com/neuromaxer/appx/internal/terminal"
 	appxtls "github.com/neuromaxer/appx/internal/tls"
@@ -40,10 +39,8 @@ type Config struct {
 	HTTPMode         bool     // true = plain HTTP, locked to localhost
 	BaseDomain       string   // "localhost" in HTTP mode, Domain value in production
 	HostAliases      []string // additional hosts that serve the dashboard (e.g. server IP or hostname)
-	AgentBackend     string
 	AgentServerURL   string
 	AgentServerToken string
-	OpenCodeClient   *opencode.Client
 	EgressStore      *egress.Store
 	EgressPending    *egress.PendingRegistry
 	LocalManager     *terminal.LocalManager
@@ -88,10 +85,9 @@ func Run(cfg Config) error {
 		HTTPMode:         cfg.HTTPMode,
 		BaseDomain:       cfg.BaseDomain,
 		HostAliases:      cfg.HostAliases,
-		AgentBackend:     cfg.AgentBackend,
 		AgentServerURL:   cfg.AgentServerURL,
 		AgentServerToken: cfg.AgentServerToken,
-	}, cfg.OpenCodeClient, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
+	}, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
 
 	if cfg.HTTPMode {
 		return runHTTP(cfg, handler)

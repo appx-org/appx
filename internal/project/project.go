@@ -41,13 +41,12 @@ const PortRangeEnd = 10999
 // on disk containing a git repository. The AssignedPort is used by the subdomain
 // reverse proxy to route <name>.localhost requests to the project's dev server.
 type Project struct {
-	ID                string        `json:"id"`
-	Name              string        `json:"name"`
-	Status            ProjectStatus `json:"status"`
-	AssignedPort      int           `json:"assignedPort"`
-	OpenCodeProjectID string        `json:"openCodeProjectId,omitempty"`
-	LastError         string        `json:"lastError,omitempty"`
-	CreatedAt         string        `json:"createdAt"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Status       ProjectStatus `json:"status"`
+	AssignedPort int           `json:"assignedPort"`
+	LastError    string        `json:"lastError,omitempty"`
+	CreatedAt    string        `json:"createdAt"`
 	// AppRunning indicates whether a TCP listener is active on the project's
 	// assigned port. Populated at query time by the health checker, not persisted.
 	AppRunning bool `json:"appRunning"`

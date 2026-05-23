@@ -5,25 +5,25 @@ After=network.target
 Before=appx.service
 
 [Service]
-User=opencode
-Group=opencode
+User=appx-agent
+Group=appx-agent
 UMask=0007
 
 EnvironmentFile=/etc/appx/appx.env
-Environment=HOME=/home/opencode
+Environment=HOME=/home/appx-agent
 
 # Route provider HTTPS traffic through appx's egress CONNECT proxy on 127.0.0.1:9080.
-# This keeps Pi model calls behind the same allowlist and request logging as the
-# legacy OpenCode backend. Node.js needs NODE_USE_ENV_PROXY=1 before fetch/core
-# HTTP clients honor HTTPS_PROXY/NO_PROXY.
+# This keeps Pi model calls behind the same allowlist and request logging as
+# other agent network traffic. Node.js needs NODE_USE_ENV_PROXY=1 before
+# fetch/core HTTP clients honor HTTPS_PROXY/NO_PROXY.
 Environment=NODE_USE_ENV_PROXY=1
 Environment=HTTPS_PROXY=http://127.0.0.1:9080
 Environment=NO_PROXY=localhost,127.0.0.1
 
 Environment=AGENT_SERVER_MODE=multi
 Environment=PROJECT_DIR=__APPX_PROJECTS_DIR__
-Environment=SESSIONS_DIR=/home/opencode/.pi/agent/appx-default-sessions
-Environment=AGENT_DIR=/home/opencode/.pi/agent
+Environment=SESSIONS_DIR=/home/appx-agent/.pi/agent/appx-default-sessions
+Environment=AGENT_DIR=/home/appx-agent/.pi/agent
 Environment=AGENTS_FILE=.pi/AGENTS.md
 Environment=AGENT_SERVER_HOST=127.0.0.1
 Environment=AGENT_SERVER_PORT=4001

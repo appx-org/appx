@@ -82,7 +82,7 @@ func handleShellResize(lm *terminal.LocalManager) http.HandlerFunc {
 // handleShellConnect handles GET /api/shell/{id}/connect. It upgrades to a
 // WebSocket and proxies raw terminal I/O between the browser and the PTY.
 //
-// Protocol (matches OpenCode's PTY WebSocket so Terminal.tsx can be reused):
+// Protocol:
 //   - Text frames from client → stdin of the shell
 //   - Binary frames from server → stdout/stderr of the shell
 //

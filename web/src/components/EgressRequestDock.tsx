@@ -22,9 +22,12 @@ export default function EgressRequestDock() {
   }, []);
 
   useEffect(() => {
-    poll();
-    const interval = setInterval(poll, 2000);
-    return () => clearInterval(interval);
+    const initial = window.setTimeout(() => void poll(), 0);
+    const interval = window.setInterval(() => void poll(), 2000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
   }, [poll]);
 
   const handleApprove = async (id: string) => {

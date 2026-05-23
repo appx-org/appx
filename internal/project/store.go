@@ -9,9 +9,8 @@ import (
 )
 
 // Store provides CRUD operations for projects in the SQLite database.
-// New projects use assigned_port and opencode_project_id columns; legacy Docker
-// columns (container_id, network_id, image_name, container_secret, resources)
-// are retained in the schema but ignored by new code.
+// New projects use assigned_port for app subdomain routing. Legacy Docker
+// columns are retained in existing databases but ignored by new code.
 type Store struct {
 	db *sql.DB
 }
@@ -21,8 +20,8 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// projectColumns is the canonical SELECT column list. Only new-architecture columns.
-const projectColumns = `id, name, status, assigned_port, opencode_project_id, last_error, created_at`
+// projectColumns is the canonical SELECT column list used by all project reads.
+const projectColumns = `id, name, status, assigned_port, last_error, created_at`
 
 // Create inserts a new project with the given name and an auto-assigned port
 // from PortRangeStart-PortRangeEnd. Returns ErrInvalidName, ErrDuplicateName,
@@ -129,22 +128,6 @@ func (s *Store) GetByName(name string) (*Project, error) {
 	return p, nil
 }
 
-// SetOpenCodeProjectID stores the OpenCode project ID after discovery.
-func (s *Store) SetOpenCodeProjectID(id, ocProjectID string) error {
-	res, err := s.db.Exec(
-		"UPDATE projects SET opencode_project_id = ? WHERE id = ?",
-		ocProjectID, id,
-	)
-	if err != nil {
-		return fmt.Errorf("set opencode project id: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 // SetError updates a project to the error state with an error message.
 func (s *Store) SetError(id string, errMsg string) error {
 	_, err := s.db.Exec(
@@ -228,10 +211,10 @@ type scanner interface {
 func scanInto(sc scanner) (*Project, error) {
 	var p Project
 	var assignedPort sql.NullInt64
-	var ocProjectID, lastError sql.NullString
+	var lastError sql.NullString
 	err := sc.Scan(
 		&p.ID, &p.Name, &p.Status, &assignedPort,
-		&ocProjectID, &lastError, &p.CreatedAt,
+		&lastError, &p.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -239,7 +222,6 @@ func scanInto(sc scanner) (*Project, error) {
 	if assignedPort.Valid {
 		p.AssignedPort = int(assignedPort.Int64)
 	}
-	p.OpenCodeProjectID = ocProjectID.String
 	p.LastError = lastError.String
 	return &p, nil
 }
