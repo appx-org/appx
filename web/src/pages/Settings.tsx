@@ -201,6 +201,7 @@ export default function Settings() {
   const [subscriptionFlow, setSubscriptionFlow] = useState<AgentOAuthFlowState | null>(null);
   const [subscriptionInput, setSubscriptionInput] = useState('');
   const [subscriptionFallbackOpen, setSubscriptionFallbackOpen] = useState(false);
+  const [customEditorOpen, setCustomEditorOpen] = useState(false);
   const [customForm, setCustomForm] = useState<CustomForm>(defaultCustomForm);
   const [saving, setSaving] = useState(false);
   const [customSaving, setCustomSaving] = useState(false);
@@ -430,6 +431,16 @@ export default function Settings() {
     setCustomForm((current) => ({ ...current, [key]: value }));
   };
 
+  const openCustomProviderEditor = (provider?: AgentCustomProvider) => {
+    setCustomForm(provider ? modelFromCustom(provider) : defaultCustomForm);
+    setCustomEditorOpen(true);
+  };
+
+  const closeCustomProviderEditor = () => {
+    setCustomEditorOpen(false);
+    setCustomForm(defaultCustomForm);
+  };
+
   const handleSaveCustomProvider = async () => {
     const existing = customProviders.find((provider) => provider.provider === customForm.provider.trim());
     const contextWindow = Number(customForm.contextWindow);
@@ -470,6 +481,7 @@ export default function Settings() {
       });
       await loadPiAuth();
       setCustomForm((current) => ({ ...current, apiKey: '' }));
+      setCustomEditorOpen(false);
       setSuccess(`${saved.name || saved.provider} provider saved.`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save custom provider');
@@ -479,12 +491,13 @@ export default function Settings() {
   };
 
   const handleDeleteCustomProvider = async (provider: string) => {
+    const deletingOpenProvider = customForm.provider === provider;
     setCustomSaving(true);
     clearMessages();
     try {
       await deleteAgentCustomProvider(provider);
       await loadPiAuth();
-      if (customForm.provider === provider) setCustomForm(defaultCustomForm);
+      if (deletingOpenProvider) closeCustomProviderEditor();
       setSuccess(`${provider} custom provider removed.`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to remove custom provider');
@@ -734,140 +747,33 @@ export default function Settings() {
               </div>
 
               <div style={styles.section}>
-                <h3 style={styles.cardTitle}>Custom Provider</h3>
-                <div style={styles.customGrid}>
-                  <label style={styles.fieldLabel}>
-                    Provider
-                    <input
-                      style={styles.input}
-                      value={customForm.provider}
-                      onChange={(event) => updateCustomForm('provider', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabel}>
-                    Name
-                    <input
-                      style={styles.input}
-                      value={customForm.name}
-                      onChange={(event) => updateCustomForm('name', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabelLarge}>
-                    Base URL
-                    <input
-                      style={styles.input}
-                      value={customForm.baseUrl}
-                      onChange={(event) => updateCustomForm('baseUrl', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabel}>
-                    API
-                    <select
-                      style={styles.select}
-                      value={customForm.api}
-                      onChange={(event) => updateCustomForm('api', event.target.value as AgentCustomProviderApi)}
-                    >
-                      {(['openai-responses', 'openai-completions', 'anthropic-messages'] as AgentCustomProviderApi[]).map((api) => (
-                        <option key={api} value={api}>{apiLabel(api)}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={styles.fieldLabel}>
-                    API key
-                    <input
-                      style={styles.input}
-                      type="password"
-                      value={customForm.apiKey}
-                      placeholder={
-                        customProviders.find((provider) => provider.provider === customForm.provider)?.apiKeyConfigured
-                          ? 'Stored'
-                          : 'Required'
-                      }
-                      onChange={(event) => updateCustomForm('apiKey', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabelLarge}>
-                    Model
-                    <input
-                      style={styles.input}
-                      value={customForm.modelId}
-                      onChange={(event) => updateCustomForm('modelId', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabelLarge}>
-                    Model name
-                    <input
-                      style={styles.input}
-                      value={customForm.modelName}
-                      onChange={(event) => updateCustomForm('modelName', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabel}>
-                    Context
-                    <input
-                      style={styles.input}
-                      inputMode="numeric"
-                      value={customForm.contextWindow}
-                      onChange={(event) => updateCustomForm('contextWindow', event.target.value)}
-                    />
-                  </label>
-                  <label style={styles.fieldLabel}>
-                    Max tokens
-                    <input
-                      style={styles.input}
-                      inputMode="numeric"
-                      value={customForm.maxTokens}
-                      onChange={(event) => updateCustomForm('maxTokens', event.target.value)}
-                    />
-                  </label>
-                </div>
-
-                <div style={styles.toggleRow}>
-                  <label style={styles.checkboxLabel}>
-                    <input
-                      type="checkbox"
-                      checked={customForm.reasoning}
-                      onChange={(event) => updateCustomForm('reasoning', event.target.checked)}
-                    />
-                    Reasoning
-                  </label>
-                  <select
-                    style={styles.compactSelect}
-                    value={customForm.thinkingPreset}
-                    onChange={(event) => updateCustomForm('thinkingPreset', event.target.value as CustomForm['thinkingPreset'])}
-                    disabled={!customForm.reasoning}
-                  >
-                    <option value="standard">Standard thinking</option>
-                    <option value="deepseek">DeepSeek thinking</option>
-                    <option value="none">No thinking map</option>
-                  </select>
+                <div style={styles.sectionHeader}>
+                  <div style={styles.sectionTitleGroup}>
+                    <h3 style={{ ...styles.cardTitle, margin: 0 }}>Custom Provider</h3>
+                    <span style={styles.statusMuted}>
+                      {customProviders.length === 1 ? '1 configured' : `${customProviders.length} configured`}
+                    </span>
+                  </div>
                   <button
-                    data-btn="primary"
-                    style={styles.saveBtn}
-                    onClick={handleSaveCustomProvider}
-                    disabled={
-                      customSaving ||
-                      !customForm.provider.trim() ||
-                      !customForm.baseUrl.trim() ||
-                      !customForm.modelId.trim() ||
-                      (!customForm.apiKey.trim() && !customProviders.find((provider) => provider.provider === customForm.provider.trim())?.apiKeyConfigured)
-                    }
+                    type="button"
+                    style={styles.iconBtn}
+                    aria-label={customEditorOpen ? 'Close custom provider editor' : 'Add custom provider'}
+                    title={customEditorOpen ? 'Close' : 'Add custom provider'}
+                    onClick={customEditorOpen ? closeCustomProviderEditor : () => openCustomProviderEditor()}
                   >
-                    {customSaving ? 'Saving...' : 'Save provider'}
+                    {customEditorOpen ? '\u00d7' : '+'}
                   </button>
                 </div>
 
-                <div style={styles.customProviderList}>
-                  {customProviders.length === 0 ? (
-                    <span style={styles.emptyText}>No custom providers</span>
-                  ) : (
-                    customProviders.map((provider) => (
+                {customProviders.length > 0 ? (
+                  <div style={styles.customProviderList}>
+                    {customProviders.map((provider) => (
                       <div key={provider.provider} style={styles.customProviderRow}>
                         <button
                           type="button"
                           style={styles.customProviderPick}
                           onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => setCustomForm(modelFromCustom(provider))}
+                          onClick={() => openCustomProviderEditor(provider)}
                         >
                           <span style={styles.providerName}>{provider.name || provider.provider}</span>
                           <span style={styles.statusMuted}>{provider.modelCount} models</span>
@@ -884,9 +790,137 @@ export default function Settings() {
                           Remove
                         </button>
                       </div>
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  !customEditorOpen && <span style={styles.emptyText}>No custom providers</span>
+                )}
+
+                {customEditorOpen && (
+                  <div style={styles.customEditor}>
+                    <div style={styles.customGrid}>
+                      <label style={styles.fieldLabel}>
+                        Provider
+                        <input
+                          style={styles.input}
+                          value={customForm.provider}
+                          onChange={(event) => updateCustomForm('provider', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabel}>
+                        Name
+                        <input
+                          style={styles.input}
+                          value={customForm.name}
+                          onChange={(event) => updateCustomForm('name', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabelLarge}>
+                        Base URL
+                        <input
+                          style={styles.input}
+                          value={customForm.baseUrl}
+                          onChange={(event) => updateCustomForm('baseUrl', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabel}>
+                        API
+                        <select
+                          style={styles.select}
+                          value={customForm.api}
+                          onChange={(event) => updateCustomForm('api', event.target.value as AgentCustomProviderApi)}
+                        >
+                          {(['openai-responses', 'openai-completions', 'anthropic-messages'] as AgentCustomProviderApi[]).map((api) => (
+                            <option key={api} value={api}>{apiLabel(api)}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={styles.fieldLabel}>
+                        API key
+                        <input
+                          style={styles.input}
+                          type="password"
+                          value={customForm.apiKey}
+                          placeholder={
+                            customProviders.find((provider) => provider.provider === customForm.provider)?.apiKeyConfigured
+                              ? 'Stored'
+                              : 'Required'
+                          }
+                          onChange={(event) => updateCustomForm('apiKey', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabelLarge}>
+                        Model
+                        <input
+                          style={styles.input}
+                          value={customForm.modelId}
+                          onChange={(event) => updateCustomForm('modelId', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabelLarge}>
+                        Model name
+                        <input
+                          style={styles.input}
+                          value={customForm.modelName}
+                          onChange={(event) => updateCustomForm('modelName', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabel}>
+                        Context
+                        <input
+                          style={styles.input}
+                          inputMode="numeric"
+                          value={customForm.contextWindow}
+                          onChange={(event) => updateCustomForm('contextWindow', event.target.value)}
+                        />
+                      </label>
+                      <label style={styles.fieldLabel}>
+                        Max tokens
+                        <input
+                          style={styles.input}
+                          inputMode="numeric"
+                          value={customForm.maxTokens}
+                          onChange={(event) => updateCustomForm('maxTokens', event.target.value)}
+                        />
+                      </label>
+                    </div>
+
+                    <div style={styles.toggleRow}>
+                      <label style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={customForm.reasoning}
+                          onChange={(event) => updateCustomForm('reasoning', event.target.checked)}
+                        />
+                        Reasoning
+                      </label>
+                      <select
+                        style={styles.compactSelect}
+                        value={customForm.thinkingPreset}
+                        onChange={(event) => updateCustomForm('thinkingPreset', event.target.value as CustomForm['thinkingPreset'])}
+                        disabled={!customForm.reasoning}
+                      >
+                        <option value="standard">Standard thinking</option>
+                        <option value="deepseek">DeepSeek thinking</option>
+                        <option value="none">No thinking map</option>
+                      </select>
+                      <button
+                        data-btn="primary"
+                        style={styles.saveBtn}
+                        onClick={handleSaveCustomProvider}
+                        disabled={
+                          customSaving ||
+                          !customForm.provider.trim() ||
+                          !customForm.baseUrl.trim() ||
+                          !customForm.modelId.trim() ||
+                          (!customForm.apiKey.trim() && !customProviders.find((provider) => provider.provider === customForm.provider.trim())?.apiKeyConfigured)
+                        }
+                      >
+                        {customSaving ? 'Saving...' : 'Save provider'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
@@ -1352,6 +1386,40 @@ const styles: Record<string, CSSProperties> = {
     borderTop: '1px solid var(--border)',
     marginTop: 18,
     paddingTop: 18,
+  },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  sectionTitleGroup: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  iconBtn: {
+    width: 30,
+    height: 30,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--cyan)',
+    fontSize: 19,
+    lineHeight: 1,
+    cursor: 'pointer',
+    outline: 'none',
+  },
+  customEditor: {
+    borderTop: '1px solid var(--border)',
+    marginTop: 14,
+    paddingTop: 14,
   },
   customGrid: {
     display: 'grid',
