@@ -89,6 +89,7 @@ export function attach(projectId: string, sessionId: string): SessionState {
   entry.poll = window.setInterval(() => {
     void refreshExtensionRequests(projectId, sessionId, entryKey);
   }, 1_500);
+  emit(entryKey);
 
   es.onopen = () => dispatch(entryKey, { type: 'set_connected', connected: true });
   es.onerror = () => dispatch(entryKey, { type: 'set_connected', connected: false });
@@ -133,7 +134,10 @@ export function subscribe(projectId: string, sessionId: string, listener: () => 
   set.add(listener);
   return () => {
     set?.delete(listener);
-    if (set?.size === 0) listeners.delete(entryKey);
+    if (set?.size === 0) {
+      listeners.delete(entryKey);
+      detach(projectId, sessionId);
+    }
   };
 }
 
@@ -143,6 +147,7 @@ export function getSnapshot(projectId: string, sessionId: string): SessionState 
 
 export async function sendPrompt(projectId: string, sessionId: string, text: string): Promise<void> {
   const entryKey = key(projectId, sessionId);
+  attach(projectId, sessionId);
   const entry = entries.get(entryKey);
   if (entry) entry.lastPromptAt = Date.now();
   dispatch(entryKey, { type: 'user_prompt_submitted', text });

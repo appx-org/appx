@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   abortSession as storeAbort,
   attach,
@@ -11,7 +11,10 @@ import type { PiExtensionUiResponse } from '../../api/piAgent';
 import { initialSessionState } from './types';
 
 export function usePiSession(projectId: string, sessionId: string | null) {
-  if (sessionId) attach(projectId, sessionId);
+  useEffect(() => {
+    if (!sessionId) return;
+    attach(projectId, sessionId);
+  }, [projectId, sessionId]);
 
   const state = useSyncExternalStore(
     useCallback(
