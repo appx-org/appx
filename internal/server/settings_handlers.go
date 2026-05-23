@@ -149,12 +149,16 @@ func handleGetTerminalBufferSize(store *auth.Store) http.HandlerFunc {
 }
 
 // handleGetConfig returns the handler for GET /api/config. It exposes server
-// runtime configuration that the frontend needs at startup — currently the
-// baseDomain so the SPA can construct correct subdomain URLs regardless of
-// deployment mode. Auth required.
-func handleGetConfig(baseDomain string) http.HandlerFunc {
+// runtime configuration that the frontend needs at startup. Auth required.
+func handleGetConfig(baseDomain string, agentBackend string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]string{"baseDomain": baseDomain})
+		if agentBackend == "" {
+			agentBackend = "opencode"
+		}
+		writeJSON(w, map[string]string{
+			"baseDomain":   baseDomain,
+			"agentBackend": agentBackend,
+		})
 	}
 }
 

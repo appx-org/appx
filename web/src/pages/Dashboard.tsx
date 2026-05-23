@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [baseDomain, setBaseDomain] = useState('localhost');
+  const [agentBackend, setAgentBackend] = useState<'opencode' | 'pi'>('opencode');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchProjects = useCallback(() => {
@@ -27,7 +28,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     getServerConfig()
-      .then((cfg) => setBaseDomain(cfg.baseDomain || 'localhost'))
+      .then((cfg) => {
+        setBaseDomain(cfg.baseDomain || 'localhost');
+        setAgentBackend(cfg.agentBackend || 'opencode');
+      })
       .catch(() => {});
     fetchProjects();
     pollRef.current = setInterval(fetchProjects, POLL_INTERVAL);
@@ -39,7 +43,7 @@ export default function Dashboard() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <span style={styles.wordmark}>APPX</span>
-          <OpenCodeStatus />
+          <OpenCodeStatus backend={agentBackend} />
         </div>
         <div style={styles.headerActions}>
           <button data-btn="new-project" style={styles.newProjectBtn} onClick={() => setShowCreate(true)}>

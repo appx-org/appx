@@ -37,9 +37,10 @@ type Config struct {
 	TLSHosts        []string
 	Domain          string
 	CloudflareToken string
-	HTTPMode        bool   // true = plain HTTP, locked to localhost
-	BaseDomain      string // "localhost" in HTTP mode, Domain value in production
+	HTTPMode        bool     // true = plain HTTP, locked to localhost
+	BaseDomain      string   // "localhost" in HTTP mode, Domain value in production
 	HostAliases     []string // additional hosts that serve the dashboard (e.g. server IP or hostname)
+	AgentBackend    string
 	OpenCodeClient  *opencode.Client
 	EgressStore     *egress.Store
 	EgressPending   *egress.PendingRegistry
@@ -82,9 +83,10 @@ func Run(cfg Config) error {
 	}()
 
 	handler := NewRouter(a, cfg.ProjectManager, cfg.WebFS, RouterConfig{
-		HTTPMode:    cfg.HTTPMode,
-		BaseDomain:  cfg.BaseDomain,
-		HostAliases: cfg.HostAliases,
+		HTTPMode:     cfg.HTTPMode,
+		BaseDomain:   cfg.BaseDomain,
+		HostAliases:  cfg.HostAliases,
+		AgentBackend: cfg.AgentBackend,
 	}, cfg.OpenCodeClient, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
 
 	if cfg.HTTPMode {
@@ -177,8 +179,6 @@ func runHTTP(cfg Config, handler http.Handler) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
-
-
 
 	return serveHTTP(srv, cfg.Port)
 }

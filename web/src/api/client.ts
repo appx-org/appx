@@ -49,6 +49,7 @@ export interface Project {
 /** Server config returned by GET /api/config. */
 export interface ServerConfig {
   baseDomain: string;
+  agentBackend: 'opencode' | 'pi';
 }
 
 /** Fetches server runtime configuration including baseDomain. GET /api/config. */

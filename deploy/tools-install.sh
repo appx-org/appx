@@ -24,6 +24,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+APPX_AGENT_BACKEND="${APPX_AGENT_BACKEND:-}"
+if [ -z "$APPX_AGENT_BACKEND" ] && [ -f /etc/appx/appx.env ]; then
+  APPX_AGENT_BACKEND=$(grep '^APPX_AGENT_BACKEND=' /etc/appx/appx.env | cut -d= -f2- || true)
+fi
+APPX_AGENT_BACKEND="${APPX_AGENT_BACKEND:-pi}"
 
 # Detect architecture.
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
@@ -121,23 +126,27 @@ NODE_BIN_DIR="$(dirname "$(readlink -f /usr/local/bin/node)")"
 # OpenCode (installed via npm, pinned to deploy/opencode-version)
 # ---------------------------------------------------------------------------
 
-OPENCODE_VERSION=""
-if [ -f "$SCRIPT_DIR/opencode-version" ]; then
-  OPENCODE_VERSION=$(cat "$SCRIPT_DIR/opencode-version" | tr -d '[:space:]')
-fi
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  OPENCODE_VERSION=""
+  if [ -f "$SCRIPT_DIR/opencode-version" ]; then
+    OPENCODE_VERSION=$(cat "$SCRIPT_DIR/opencode-version" | tr -d '[:space:]')
+  fi
 
-# Strip leading 'v' for npm version syntax.
-OPENCODE_NPM_VERSION=$(echo "$OPENCODE_VERSION" | sed 's/^v//')
+  # Strip leading 'v' for npm version syntax.
+  OPENCODE_NPM_VERSION=$(echo "$OPENCODE_VERSION" | sed 's/^v//')
 
-CURRENT=$(/usr/local/bin/opencode --version 2>/dev/null || echo "")
+  CURRENT=$(/usr/local/bin/opencode --version 2>/dev/null || echo "")
 
-if [ -n "$OPENCODE_NPM_VERSION" ] && [ "$CURRENT" = "$OPENCODE_NPM_VERSION" ]; then
-  echo "opencode already at $OPENCODE_NPM_VERSION"
+  if [ -n "$OPENCODE_NPM_VERSION" ] && [ "$CURRENT" = "$OPENCODE_NPM_VERSION" ]; then
+    echo "opencode already at $OPENCODE_NPM_VERSION"
+  else
+    echo "installing opencode${OPENCODE_NPM_VERSION:+ $OPENCODE_NPM_VERSION} via npm..."
+    npm install -g "opencode-ai@${OPENCODE_NPM_VERSION:-latest}"
+    ln -sf "$NODE_BIN_DIR/opencode" /usr/local/bin/opencode
+    echo "opencode installed: $(/usr/local/bin/opencode --version 2>/dev/null)"
+  fi
 else
-  echo "installing opencode${OPENCODE_NPM_VERSION:+ $OPENCODE_NPM_VERSION} via npm..."
-  npm install -g "opencode-ai@${OPENCODE_NPM_VERSION:-latest}"
-  ln -sf "$NODE_BIN_DIR/opencode" /usr/local/bin/opencode
-  echo "opencode installed: $(/usr/local/bin/opencode --version 2>/dev/null)"
+  echo "skipping opencode install (APPX_AGENT_BACKEND=$APPX_AGENT_BACKEND)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -149,7 +158,7 @@ if [ -f "$SCRIPT_DIR/pi-version" ]; then
   PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
 fi
 
-CURRENT_PI=$(/usr/local/bin/pi --version 2>/dev/null || echo "")
+CURRENT_PI=$(/usr/local/bin/pi --version 2>&1 || echo "")
 
 if [ -n "$PI_VERSION" ] && [ "$CURRENT_PI" = "$PI_VERSION" ]; then
   echo "pi already at $PI_VERSION"
@@ -157,7 +166,7 @@ else
   echo "installing pi${PI_VERSION:+ $PI_VERSION} via npm..."
   npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION:-latest}"
   ln -sf "$NODE_BIN_DIR/pi" /usr/local/bin/pi
-  echo "pi installed: $(/usr/local/bin/pi --version 2>/dev/null)"
+  echo "pi installed: $(/usr/local/bin/pi --version 2>&1)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -205,6 +214,6 @@ echo "  task:     $(task --version 2>/dev/null || echo 'not found')"
 echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"
-echo "  opencode: $(/usr/local/bin/opencode --version 2>/dev/null || echo 'not found')"
-echo "  pi:       $(/usr/local/bin/pi --version 2>/dev/null || echo 'not found')"
+echo "  opencode: $(/usr/local/bin/opencode --version 2>/dev/null || echo "skipped ($APPX_AGENT_BACKEND)")"
+echo "  pi:       $(/usr/local/bin/pi --version 2>&1 || echo 'not found')"
 echo "  claude:   $(claude --version 2>/dev/null || echo 'not found')"

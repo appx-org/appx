@@ -30,14 +30,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # ---------------------------------------------------------------------------
 
 DATA_DIR="/var/lib/appx"
+APPX_AGENT_BACKEND="pi"
 if [ -f /etc/appx/appx.env ]; then
   # shellcheck source=/dev/null
   _APPX_DATA=$(grep '^APPX_DATA=' /etc/appx/appx.env | cut -d= -f2- || true)
   if [ -n "$_APPX_DATA" ]; then
     DATA_DIR="${_APPX_DATA%/}"
   fi
+  _APPX_AGENT_BACKEND=$(grep '^APPX_AGENT_BACKEND=' /etc/appx/appx.env | cut -d= -f2- || true)
+  if [ -n "$_APPX_AGENT_BACKEND" ]; then
+    APPX_AGENT_BACKEND="$_APPX_AGENT_BACKEND"
+  fi
 fi
 echo "data directory: $DATA_DIR"
+echo "agent backend: $APPX_AGENT_BACKEND"
 
 # ---------------------------------------------------------------------------
 # OS users and groups
@@ -102,29 +108,31 @@ echo "directory ready: $DATA_DIR/projects (appx:projects 2770)"
 install -d -o opencode -g opencode -m 700 /home/opencode
 echo "directory ready: /home/opencode (opencode:opencode 700)"
 
-# OpenCode config: pin the default model to the Anthropic BYOK provider so
-# that API calls go directly to api.anthropic.com using the injected key,
-# rather than routing through the opencode.ai zen proxy (which requires a
-# separate OpenCode account key).
-OC_CONFIG_DIR="/home/opencode/.config/opencode"
-OC_CONFIG_FILE="$OC_CONFIG_DIR/opencode.json"
-install -d -o opencode -g opencode -m 700 "$OC_CONFIG_DIR"
-if [ ! -f "$OC_CONFIG_FILE" ]; then
-  install -m 600 -o opencode -g opencode "$SCRIPT_DIR/opencode.json" "$OC_CONFIG_FILE"
-  echo "wrote opencode config → $OC_CONFIG_FILE"
-else
-  echo "opencode config already exists: $OC_CONFIG_FILE"
-fi
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  # OpenCode config: pin the default model to the Anthropic BYOK provider so
+  # that API calls go directly to api.anthropic.com using the injected key,
+  # rather than routing through the opencode.ai zen proxy (which requires a
+  # separate OpenCode account key).
+  OC_CONFIG_DIR="/home/opencode/.config/opencode"
+  OC_CONFIG_FILE="$OC_CONFIG_DIR/opencode.json"
+  install -d -o opencode -g opencode -m 700 "$OC_CONFIG_DIR"
+  if [ ! -f "$OC_CONFIG_FILE" ]; then
+    install -m 600 -o opencode -g opencode "$SCRIPT_DIR/opencode.json" "$OC_CONFIG_FILE"
+    echo "wrote opencode config → $OC_CONFIG_FILE"
+  else
+    echo "opencode config already exists: $OC_CONFIG_FILE"
+  fi
 
-# AGENTS.md: global rules for the OpenCode agent, including egress access
-# request instructions. Copied only on first setup — user customizations
-# are preserved on subsequent runs.
-OC_AGENTS_FILE="$OC_CONFIG_DIR/AGENTS.md"
-if [ ! -f "$OC_AGENTS_FILE" ]; then
-  install -m 600 -o opencode -g opencode "$SCRIPT_DIR/AGENTS.md" "$OC_AGENTS_FILE"
-  echo "wrote agents rules → $OC_AGENTS_FILE"
-else
-  echo "agents rules already exist: $OC_AGENTS_FILE"
+  # AGENTS.md: global rules for the OpenCode agent, including egress access
+  # request instructions. Copied only on first setup — user customizations
+  # are preserved on subsequent runs.
+  OC_AGENTS_FILE="$OC_CONFIG_DIR/AGENTS.md"
+  if [ ! -f "$OC_AGENTS_FILE" ]; then
+    install -m 600 -o opencode -g opencode "$SCRIPT_DIR/AGENTS.md" "$OC_AGENTS_FILE"
+    echo "wrote agents rules → $OC_AGENTS_FILE"
+  else
+    echo "agents rules already exist: $OC_AGENTS_FILE"
+  fi
 fi
 
 # Pi agent config/auth/cache dir. Pi is project-local for prompts, skills, and
@@ -152,19 +160,30 @@ fi
 
 cp "$SCRIPT_DIR/appx.service" /etc/systemd/system/appx.service
 
-# OpenCode needs WorkingDirectory set to the shared projects dir.
-# Since systemd can't expand env vars in WorkingDirectory, we substitute
-# the resolved path into the service file before installing it.
-sed "s|WorkingDirectory=.*|WorkingDirectory=$DATA_DIR/projects|" \
-  "$SCRIPT_DIR/opencode.service" > /etc/systemd/system/opencode.service
-echo "copied service files to /etc/systemd/system/"
-echo "opencode WorkingDirectory → $DATA_DIR/projects"
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  # OpenCode needs WorkingDirectory set to the shared projects dir.
+  # Since systemd can't expand env vars in WorkingDirectory, we substitute
+  # the resolved path into the service file before installing it.
+  sed "s|WorkingDirectory=.*|WorkingDirectory=$DATA_DIR/projects|" \
+    "$SCRIPT_DIR/opencode.service" > /etc/systemd/system/opencode.service
+  echo "copied service files to /etc/systemd/system/"
+  echo "opencode WorkingDirectory → $DATA_DIR/projects"
+else
+  systemctl disable --now opencode 2>/dev/null || true
+  rm -f /etc/systemd/system/opencode.service
+  echo "copied appx.service; opencode.service disabled for $APPX_AGENT_BACKEND backend"
+fi
 
 systemctl daemon-reload
 echo "systemd reloaded"
 
-systemctl enable appx opencode
-echo "services enabled: appx, opencode"
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  systemctl enable appx opencode
+  echo "services enabled: appx, opencode"
+else
+  systemctl enable appx
+  echo "services enabled: appx"
+fi
 
 # ---------------------------------------------------------------------------
 # Summary

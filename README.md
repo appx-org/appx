@@ -1,10 +1,10 @@
 # Appx
 
-Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents powered by [OpenCode](https://github.com/anomalyco/opencode).
+Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents. New installs default to Pi; the legacy OpenCode backend remains available with `APPX_AGENT_BACKEND=opencode`.
 
 ## What it does
 
-Appx is a management shell for running OpenCode agents on a remote server. It provides authentication, TLS termination, a web dashboard, and a reverse proxy — so you can manage projects, chat with agents, and access agent-built apps from a browser over HTTPS.
+Appx is a management shell for running coding agents on a remote server. It provides authentication, TLS termination, a web dashboard, and a reverse proxy — so you can manage projects, chat with agents, and access agent-built apps from a browser over HTTPS.
 
 ## Architecture
 
@@ -13,13 +13,13 @@ Browser
   └── HTTPS (single port)
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
-        ├── /api/opencode/* Reverse proxy → OpenCode server
+        ├── /api/opencode/* Legacy reverse proxy → OpenCode server
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
 Everything is a single Go binary. The React frontend is compiled and embedded at build time. State lives in a SQLite database on disk.
 
-OpenCode runs as a **separate process** on `localhost:4096` and handles all AI agent work (sessions, tool execution, file editing, terminal). Appx proxies requests to it and adds auth + TLS on top.
+Pi is installed as the default agent runtime. Legacy OpenCode mode runs OpenCode as a separate process on `localhost:4096`; Appx proxies requests to it and adds auth + TLS on top.
 
 **Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
 
@@ -81,9 +81,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Pi, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
-
-During Opencode installation you might be prompted "opencode is installed to /usr/local/bin/opencode and may be managed by a package manager". Select `Install anyways? Yes`
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and OpenCode only when `APPX_AGENT_BACKEND=opencode`), sets up systemd services, starts everything, and runs a verification suite.
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
@@ -93,8 +91,8 @@ Bootstrap installs these tools system-wide so agents can use them in the termina
 - **Go** — compiled from the version in `go.mod`
 - **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
 - **uv** — Python version and package management (self-update: `uv self update`)
-- **OpenCode** — AI agent backend (pinned version in `deploy/opencode-version`)
-- **Pi** — AI coding agent CLI/SDK for the Pi migration path (pinned version in `deploy/pi-version`)
+- **Pi** — AI coding agent CLI/SDK (pinned version in `deploy/pi-version`)
+- **OpenCode** — optional legacy AI agent backend when `APPX_AGENT_BACKEND=opencode` (pinned version in `deploy/opencode-version`)
 - **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
 
 ### Updating appx
@@ -106,7 +104,7 @@ cd /srv/appx
 task server:deploy
 ```
 
-Pulls latest code, rebuilds, installs the binary, updates OpenCode and Pi to the pinned versions, and restarts both services.
+Pulls latest code, rebuilds, installs the binary, updates the active backend tools to the pinned versions, and restarts the needed services.
 
 ### Updating OpenCode version
 
@@ -155,15 +153,15 @@ journalctl -u opencode -f      # opencode logs
 | ------------------------------- | ---------------- | ---------------------------------------------------------- |
 | `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
 | `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, agent config    |
-| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, OpenCode, Pi, Claude Code, uv              |
-| `deploy/opencode.json`          | Model changes    | Default OpenCode model config (copied to opencode home)    |
-| `deploy/opencode-version`       | Version pin      | Pinned OpenCode version installed by tools-install         |
+| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Pi, optional OpenCode, Claude Code, uv     |
+| `deploy/opencode.json`          | Model changes    | Default OpenCode model config for legacy mode              |
+| `deploy/opencode-version`       | Version pin      | Pinned OpenCode version for legacy mode                    |
 | `deploy/pi-version`             | Version pin      | Pinned Pi version installed by tools-install               |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
 
 ## Local development
 
-OpenCode must be running before starting appx:
+For legacy OpenCode mode, OpenCode must be running before starting appx:
 
 ```bash
 opencode serve --hostname 127.0.0.1 --port 4096
@@ -249,7 +247,7 @@ Bootstrap creates two OS users with a shared `projects` group:
 
 ```
 appx      — runs the appx server, owns DB and TLS certs
-opencode  — runs OpenCode and Pi agent tooling, cannot access appx data
+opencode  — isolated agent user for Pi tooling and legacy OpenCode, cannot access appx data
 projects  — shared group, both users read/write project directories
 ```
 

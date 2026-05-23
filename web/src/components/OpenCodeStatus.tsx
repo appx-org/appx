@@ -3,14 +3,17 @@ import { getOpenCodeHealth } from '../api/client';
 
 const POLL_INTERVAL = 10000;
 
-/** OpenCodeStatus renders a small health indicator for the OpenCode server.
- *  Polls every 10 seconds. Shows a colored dot with label: green when healthy,
- *  red when down, gray on initial load. */
-export default function OpenCodeStatus() {
+/** OpenCodeStatus renders a small health indicator for the active agent backend. */
+export default function OpenCodeStatus({ backend = 'opencode' }: { backend?: 'opencode' | 'pi' }) {
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    if (backend === 'pi') {
+      setHealthy(true);
+      return;
+    }
+
     const check = () => {
       getOpenCodeHealth()
         .then(res => setHealthy(res.healthy))
@@ -23,14 +26,15 @@ export default function OpenCodeStatus() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, []);
+  }, [backend]);
 
   const color = healthy === null ? 'var(--muted)' : healthy ? 'var(--green)' : 'var(--red)';
+  const label = backend === 'pi' ? 'PI' : 'OPENCODE';
 
   return (
     <span style={styles.wrapper}>
       <span style={{ ...styles.dot, background: color }} />
-      <span style={{ ...styles.label, color }}>OPENCODE</span>
+      <span style={{ ...styles.label, color }}>{label}</span>
     </span>
   );
 }

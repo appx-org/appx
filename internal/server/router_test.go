@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"crypto/sha1"
-	"github.com/neuromaxer/appx/internal/terminal"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -21,8 +20,9 @@ import (
 	"github.com/neuromaxer/appx/internal/egress"
 	"github.com/neuromaxer/appx/internal/opencode"
 	"github.com/neuromaxer/appx/internal/project"
-	_ "modernc.org/sqlite"
+	"github.com/neuromaxer/appx/internal/terminal"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // testSchema is the minimal in-memory SQLite schema used by all server tests.
@@ -1433,8 +1433,8 @@ func TestPutAllowlist_InvalidFormat(t *testing.T) {
 
 // --- Config endpoint tests ---
 
-func TestGetConfig_ReturnsDomain(t *testing.T) {
-	handler, store, _ := setupTestWithConfig(t, RouterConfig{BaseDomain: "example.com"})
+func TestGetConfig_ReturnsRuntimeConfig(t *testing.T) {
+	handler, store, _ := setupTestWithConfig(t, RouterConfig{BaseDomain: "example.com", AgentBackend: "pi"})
 	req := authedRequest(t, store, "GET", "/api/config", "")
 	req.Host = "example.com"
 	w := httptest.NewRecorder()
@@ -1443,11 +1443,15 @@ func TestGetConfig_ReturnsDomain(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp struct {
-		BaseDomain string `json:"baseDomain"`
+		BaseDomain   string `json:"baseDomain"`
+		AgentBackend string `json:"agentBackend"`
 	}
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp.BaseDomain != "example.com" {
 		t.Errorf("expected example.com, got %q", resp.BaseDomain)
+	}
+	if resp.AgentBackend != "pi" {
+		t.Errorf("expected pi, got %q", resp.AgentBackend)
 	}
 }
 
@@ -1550,7 +1554,7 @@ func TestStripPort(t *testing.T) {
 		{"localhost", "localhost"},
 		{"example.com:443", "example.com"},
 		{"[::1]:8080", "::1"},
-		{"[::1]", "[::1]"},           // no port — returned as-is
+		{"[::1]", "[::1]"}, // no port — returned as-is
 		{"127.0.0.1:443", "127.0.0.1"},
 		{"127.0.0.1", "127.0.0.1"},
 	}

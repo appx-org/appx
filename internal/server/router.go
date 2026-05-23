@@ -26,6 +26,7 @@ type RouterConfig struct {
 	HTTPMode     bool     // true = plain HTTP dev mode, affects security headers
 	BaseDomain   string   // base domain for subdomain routing
 	HostAliases  []string // additional hostnames/IPs that also serve the dashboard (e.g. server IP)
+	AgentBackend string   // opencode or pi
 	OpenCodeURL  string   // URL of the OpenCode server (default "http://localhost:4096")
 }
 
@@ -54,7 +55,7 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	api.HandleFunc("DELETE /api/settings/api-key", handleDeleteAPIKey(a.Store, oc))
 	api.HandleFunc("GET /api/settings/terminal-buffer-size", handleGetTerminalBufferSize(a.Store))
 	api.HandleFunc("PUT /api/settings/terminal-buffer-size", handleSetTerminalBufferSize(a.Store))
-	api.HandleFunc("GET /api/config", handleGetConfig(rcfg.BaseDomain))
+	api.HandleFunc("GET /api/config", handleGetConfig(rcfg.BaseDomain, rcfg.AgentBackend))
 	api.HandleFunc("DELETE /api/session", handleLogout(a))
 	api.HandleFunc("GET /api/egress/log", handleGetEgressLog(es))
 	api.HandleFunc("GET /api/egress/allowlist", handleGetAllowlist(es))

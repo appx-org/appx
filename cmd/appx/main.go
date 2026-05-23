@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"strconv"
@@ -159,9 +160,19 @@ func main() {
 	pm := project.NewManager(projectStore, projectRoot)
 	pm.BaseDomain = baseDomain
 
-	// Initialize OpenCode client. OpenCode runs as a separate process on
-	// localhost:4096. Poll until healthy, then inject the Anthropic API key.
-	ocClient := opencode.NewClient("http://127.0.0.1:4096")
+	agentBackend := strings.ToLower(envOr("APPX_AGENT_BACKEND", "opencode"))
+	if agentBackend != "opencode" && agentBackend != "pi" {
+		log.Fatalf("unsupported APPX_AGENT_BACKEND=%q (expected opencode or pi)", agentBackend)
+	}
+
+	var ocClient *opencode.Client
+	if agentBackend == "opencode" {
+		// Initialize OpenCode client. OpenCode runs as a separate process on
+		// localhost:4096. Poll until healthy, then inject the Anthropic API key.
+		ocClient = opencode.NewClient("http://127.0.0.1:4096")
+	} else {
+		log.Printf("agent backend: pi (OpenCode disabled)")
+	}
 
 	// Resolve Anthropic API key: DB setting takes priority, then env var.
 	anthropicKey, _ := authStore.GetSetting("anthropic_api_key")
@@ -169,14 +180,16 @@ func main() {
 		anthropicKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 
-	// Start OpenCode polling in background — does not block server startup.
-	go func() {
-		pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer pollCancel()
-		if err := ocClient.InjectAPIKey(pollCtx, 2*time.Second, anthropicKey); err != nil {
-			log.Printf("opencode: startup polling failed: %v", err)
-		}
-	}()
+	if ocClient != nil {
+		// Start OpenCode polling in background — does not block server startup.
+		go func() {
+			pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer pollCancel()
+			if err := ocClient.InjectAPIKey(pollCtx, 2*time.Second, anthropicKey); err != nil {
+				log.Printf("opencode: startup polling failed: %v", err)
+			}
+		}()
+	}
 
 	webFS, err := fs.Sub(webEmbed, "web/dist")
 	if err != nil {
@@ -203,6 +216,7 @@ func main() {
 		HTTPMode:        *httpMode,
 		BaseDomain:      baseDomain,
 		HostAliases:     hosts,
+		AgentBackend:    agentBackend,
 		OpenCodeClient:  ocClient,
 		EgressStore:     egressStore,
 		EgressPending:   pendingRegistry,

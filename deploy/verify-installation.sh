@@ -20,14 +20,20 @@ FAIL=0
 
 # Read data directory from env file, fall back to default.
 DATA_DIR="/var/lib/appx"
+APPX_AGENT_BACKEND="pi"
 ENV_FILE="/etc/appx/appx.env"
 if [ -f "$ENV_FILE" ]; then
   _APPX_DATA=$(grep '^APPX_DATA=' "$ENV_FILE" | cut -d= -f2- || true)
   if [ -n "$_APPX_DATA" ]; then
     DATA_DIR="${_APPX_DATA%/}"
   fi
+  _APPX_AGENT_BACKEND=$(grep '^APPX_AGENT_BACKEND=' "$ENV_FILE" | cut -d= -f2- || true)
+  if [ -n "$_APPX_AGENT_BACKEND" ]; then
+    APPX_AGENT_BACKEND="$_APPX_AGENT_BACKEND"
+  fi
 fi
 echo "data directory: $DATA_DIR"
+echo "agent backend: $APPX_AGENT_BACKEND"
 echo ""
 
 # expect_ok: command should succeed
@@ -115,10 +121,12 @@ expect_eq "projects dir is appx:projects 2770" \
 expect_ok "opencode home exists"     test -d /home/opencode
 expect_eq "opencode home is opencode:opencode 700" \
   "$(stat -c '%U:%G %a' /home/opencode 2>/dev/null)" "opencode:opencode 700"
-expect_ok "opencode config sets anthropic model" \
-  grep -q '"anthropic/' /home/opencode/.config/opencode/opencode.json
-expect_ok "opencode AGENTS.md exists" \
-  test -f /home/opencode/.config/opencode/AGENTS.md
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  expect_ok "opencode config sets anthropic model" \
+    grep -q '"anthropic/' /home/opencode/.config/opencode/opencode.json
+  expect_ok "opencode AGENTS.md exists" \
+    test -f /home/opencode/.config/opencode/AGENTS.md
+fi
 expect_ok "pi agent dir exists"     test -d /home/opencode/.pi/agent
 expect_eq "pi agent dir is opencode:opencode 700" \
   "$(stat -c '%U:%G %a' /home/opencode/.pi/agent 2>/dev/null)" "opencode:opencode 700"
@@ -165,17 +173,23 @@ expect_ok "env file exists"              test -f /etc/appx/appx.env
 expect_eq "env file is root:root 600" \
   "$(stat -c '%U:%G %a' /etc/appx/appx.env 2>/dev/null)" "root:root 600"
 expect_ok "appx.service exists"          test -f /etc/systemd/system/appx.service
-expect_ok "opencode.service exists"      test -f /etc/systemd/system/opencode.service
 expect_ok "appx service enabled"         systemctl is-enabled appx
-expect_ok "opencode service enabled"     systemctl is-enabled opencode
-expect_ok "opencode ExecStart is /usr/local/bin" \
-  grep -q "ExecStart=/usr/local/bin/opencode" /etc/systemd/system/opencode.service
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  expect_ok "opencode.service exists"      test -f /etc/systemd/system/opencode.service
+  expect_ok "opencode service enabled"     systemctl is-enabled opencode
+  expect_ok "opencode ExecStart is /usr/local/bin" \
+    grep -q "ExecStart=/usr/local/bin/opencode" /etc/systemd/system/opencode.service
+else
+  expect_deny "opencode.service absent for pi backend" test -f /etc/systemd/system/opencode.service
+fi
 expect_ok "appx ExecStart is /usr/local/bin" \
   grep -q "ExecStart=/usr/local/bin/appx" /etc/systemd/system/appx.service
 expect_ok "appx runs as appx user" \
   grep -q "User=appx" /etc/systemd/system/appx.service
-expect_ok "opencode runs as opencode user" \
-  grep -q "User=opencode" /etc/systemd/system/opencode.service
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  expect_ok "opencode runs as opencode user" \
+    grep -q "User=opencode" /etc/systemd/system/opencode.service
+fi
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -189,13 +203,17 @@ EXPECTED_NODE_MAJOR="24"
 ACTUAL_NODE_MAJOR=$(/usr/local/bin/node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo "0")
 expect_eq "node major version is $EXPECTED_NODE_MAJOR" \
   "$ACTUAL_NODE_MAJOR" "$EXPECTED_NODE_MAJOR"
-expect_ok "opencode binary in /usr/local/bin" test -x /usr/local/bin/opencode
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  expect_ok "opencode binary in /usr/local/bin" test -x /usr/local/bin/opencode
+else
+  echo "  INFO  opencode binary not required for pi backend"
+fi
 expect_ok "pi binary in /usr/local/bin"       test -x /usr/local/bin/pi
 expect_ok "uv binary in /usr/local/bin"       test -x /usr/local/bin/uv
 
 EXPECTED_OC_VERSION=""
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/opencode-version" ]; then
+if [ "$APPX_AGENT_BACKEND" = "opencode" ] && [ -f "$SCRIPT_DIR/opencode-version" ]; then
   EXPECTED_OC_VERSION=$(cat "$SCRIPT_DIR/opencode-version" | tr -d '[:space:]' | sed 's/^v//')
 fi
 if [ -n "$EXPECTED_OC_VERSION" ]; then
@@ -209,7 +227,7 @@ if [ -f "$SCRIPT_DIR/pi-version" ]; then
   EXPECTED_PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
 fi
 if [ -n "$EXPECTED_PI_VERSION" ]; then
-  ACTUAL_PI_VERSION=$(/usr/local/bin/pi --version 2>/dev/null || echo "unknown")
+  ACTUAL_PI_VERSION=$(/usr/local/bin/pi --version 2>&1 || echo "unknown")
   expect_eq "pi version matches deploy/pi-version" \
     "$ACTUAL_PI_VERSION" "$EXPECTED_PI_VERSION"
 fi
@@ -226,18 +244,22 @@ echo ""
 echo "=== 8. Runtime (if services are running) ==="
 # ---------------------------------------------------------------------------
 
-if systemctl is-active --quiet opencode 2>/dev/null; then
-  expect_ok "opencode is running"    systemctl is-active opencode
-  expect_ok "opencode responds on :4096" \
-    curl -sf --max-time 3 http://127.0.0.1:4096/health
-  # Verify it's actually running as the opencode user.
-  OC_PID=$(systemctl show opencode --property=MainPID --value 2>/dev/null)
-  if [ -n "$OC_PID" ] && [ "$OC_PID" != "0" ]; then
-    OC_USER=$(ps -o user= -p "$OC_PID" 2>/dev/null || echo "unknown")
-    expect_eq "opencode process runs as opencode user" "$OC_USER" "opencode"
+if [ "$APPX_AGENT_BACKEND" = "opencode" ]; then
+  if systemctl is-active --quiet opencode 2>/dev/null; then
+    expect_ok "opencode is running"    systemctl is-active opencode
+    expect_ok "opencode responds on :4096" \
+      curl -sf --max-time 3 http://127.0.0.1:4096/health
+    # Verify it's actually running as the opencode user.
+    OC_PID=$(systemctl show opencode --property=MainPID --value 2>/dev/null)
+    if [ -n "$OC_PID" ] && [ "$OC_PID" != "0" ]; then
+      OC_USER=$(ps -o user= -p "$OC_PID" 2>/dev/null || echo "unknown")
+      expect_eq "opencode process runs as opencode user" "$OC_USER" "opencode"
+    fi
+  else
+    echo "  SKIP  opencode not running (start with: systemctl start opencode)"
   fi
 else
-  echo "  SKIP  opencode not running (start with: systemctl start opencode)"
+  expect_deny "opencode service inactive in pi backend" systemctl is-active opencode
 fi
 
 if systemctl is-active --quiet appx 2>/dev/null; then

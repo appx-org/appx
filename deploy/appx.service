@@ -1,7 +1,7 @@
 [Unit]
 Description=Appx — Agentic Application Proxy
 Documentation=https://github.com/neuromaxer/appx
-After=network.target opencode.service
+After=network.target
 
 [Service]
 User=appx
