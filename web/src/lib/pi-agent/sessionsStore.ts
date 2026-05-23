@@ -47,13 +47,6 @@ function dispatch(entryKey: string, action: SessionAction): void {
   emit(entryKey);
 }
 
-function hasUnsettledUi(state: SessionState): boolean {
-  return state.messages.some((message) =>
-    message.streaming ||
-    message.parts.some((part) => part.type === 'tool' && part.status !== 'done' && part.status !== 'error'),
-  );
-}
-
 async function refreshExtensionRequests(projectId: string, sessionId: string, entryKey: string): Promise<void> {
   const entry = entries.get(entryKey);
   if (!entry || entry.pollBusy) return;
@@ -68,7 +61,7 @@ async function refreshExtensionRequests(projectId: string, sessionId: string, en
     }
 
     const current = entries.get(entryKey);
-    if (!current || current.state.status === 'idle' || !hasUnsettledUi(current.state)) return;
+    if (!current || current.state.status === 'idle') return;
     if (current.lastPromptAt && Date.now() - current.lastPromptAt < 3_000) return;
 
     const settings = await getPiSessionSettings(projectId, sessionId);
@@ -164,7 +157,20 @@ export async function sendPrompt(projectId: string, sessionId: string, text: str
 }
 
 export async function abortSession(projectId: string, sessionId: string): Promise<void> {
-  await abortPiSession(projectId, sessionId);
+  const entryKey = key(projectId, sessionId);
+  try {
+    await abortPiSession(projectId, sessionId);
+  } catch (err) {
+    dispatch(entryKey, { type: 'set_error', error: err instanceof Error ? err.message : String(err) });
+  }
+
+  try {
+    const history = await getPiSessionMessages(projectId, sessionId);
+    dispatch(entryKey, { type: 'load_history', messages: history.messages as AgentMessage[] });
+  } catch {
+    dispatch(entryKey, { type: 'agent_event', event: { type: 'agent_end', messages: [] } });
+  }
+  void refreshExtensionRequests(projectId, sessionId, entryKey);
 }
 
 export async function respondExtensionRequest(
