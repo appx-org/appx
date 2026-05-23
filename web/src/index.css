@@ -44,6 +44,12 @@ button:disabled {
   cursor: default;
 }
 
+[data-provider-row]:focus,
+[data-provider-row]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 input {
   font-family: 'DM Sans', system-ui, sans-serif;
 }

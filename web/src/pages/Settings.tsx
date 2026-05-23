@@ -790,6 +790,7 @@ export default function Settings() {
                   sortedProviders.slice(0, 14).map((provider) => (
                     <button
                       key={provider.provider}
+                      data-provider-row="true"
                       type="button"
                       style={
                         provider.provider === selectedProvider
@@ -1326,14 +1327,16 @@ const styles: Record<string, CSSProperties> = {
     gridTemplateColumns: 'minmax(0, 1fr) 120px 64px',
     gap: 8,
     alignItems: 'center',
-    padding: '9px 0',
+    padding: '9px 0 9px 8px',
     border: 'none',
     borderBottom: '1px solid var(--border)',
+    borderLeft: '2px solid transparent',
     background: 'transparent',
     color: 'var(--text)',
     cursor: 'pointer',
     textAlign: 'left',
     outline: 'none',
+    boxShadow: 'none',
   },
   providerRowActive: {
     width: '100%',
@@ -1350,6 +1353,7 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     textAlign: 'left',
     outline: 'none',
+    boxShadow: 'none',
   },
   providerName: {
     minWidth: 0,
