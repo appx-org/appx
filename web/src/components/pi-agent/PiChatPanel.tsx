@@ -177,7 +177,7 @@ export default function PiChatPanel({
   const loadModelSettings = useCallback(async () => {
     try {
       const [modelList, settings] = await Promise.all([
-        listPiModels(projectId),
+        listPiModels(),
         getPiSessionSettings(projectId, sessionId),
       ]);
       setModels(modelList.models);

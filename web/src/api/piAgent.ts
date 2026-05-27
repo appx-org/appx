@@ -86,8 +86,8 @@ export function createPiSession(projectId: string) {
   });
 }
 
-export function listPiModels(projectId: string) {
-  return request<{ models: PiAgentModel[] }>(`${agentBase(projectId)}/sessions/models`);
+export function listPiModels() {
+  return request<{ models: PiAgentModel[] }>(`/api/agent/sessions/models`);
 }
 
 export function getPiSessionMessages(projectId: string, sessionId: string) {
