@@ -126,8 +126,7 @@ func TestMigrate_SkipsAlreadyApplied(t *testing.T) {
 
 // TestMigration3ContainerSecret verifies that migration 3 adds the
 // container_secret column to the projects table. This column stores the
-// password used for authenticating proxy requests to the container's
-// opencode serve instance.
+// password used for authenticating proxy requests to the container app.
 func TestMigration3ContainerSecret(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -156,11 +155,9 @@ func TestMigration3ContainerSecret(t *testing.T) {
 	}
 }
 
-// TestMigration4ProjectModel verifies that migration 4 adds the assigned_port
-// and opencode_project_id columns to the projects table. assigned_port tracks
-// the external port allocated for the project (nullable, with unique constraint),
-// and opencode_project_id stores the ID of the project in the opencode repository
-// within the container.
+// TestMigration4ProjectModel verifies that migration 4 adds assigned_port to
+// the projects table. assigned_port tracks the external port allocated for the
+// project (nullable, with unique constraint).
 func TestMigration4ProjectModel(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -192,21 +189,6 @@ func TestMigration4ProjectModel(t *testing.T) {
 	_, err = db.Exec("INSERT INTO projects (id, name, assigned_port) VALUES ('test-4', 'null-port-2', NULL)")
 	if err != nil {
 		t.Fatalf("insert with second NULL assigned_port: %v", err)
-	}
-
-	// Verify opencode_project_id column exists.
-	_, err = db.Exec("UPDATE projects SET opencode_project_id = 'oc-abc123' WHERE id = 'test-1'")
-	if err != nil {
-		t.Fatalf("update opencode_project_id: %v", err)
-	}
-
-	var ocID sql.NullString
-	err = db.QueryRow("SELECT opencode_project_id FROM projects WHERE id = 'test-1'").Scan(&ocID)
-	if err != nil {
-		t.Fatalf("select opencode_project_id: %v", err)
-	}
-	if !ocID.Valid || ocID.String != "oc-abc123" {
-		t.Errorf("expected 'oc-abc123', got %v", ocID)
 	}
 }
 

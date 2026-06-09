@@ -9,14 +9,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 
 	"strconv"
 
+	"github.com/neuromaxer/appx/internal/agentserver"
 	"github.com/neuromaxer/appx/internal/auth"
 	"github.com/neuromaxer/appx/internal/db"
 	"github.com/neuromaxer/appx/internal/egress"
-	"github.com/neuromaxer/appx/internal/opencode"
 	"github.com/neuromaxer/appx/internal/project"
 	"github.com/neuromaxer/appx/internal/server"
 	"github.com/neuromaxer/appx/internal/terminal"
@@ -159,24 +158,17 @@ func main() {
 	pm := project.NewManager(projectStore, projectRoot)
 	pm.BaseDomain = baseDomain
 
-	// Initialize OpenCode client. OpenCode runs as a separate process on
-	// localhost:4096. Poll until healthy, then inject the Anthropic API key.
-	ocClient := opencode.NewClient("http://127.0.0.1:4096")
+	agentServerURL := envOr("APPX_AGENT_SERVER_URL", "http://127.0.0.1:4001")
+	agentServerToken := os.Getenv("APPX_AGENT_SERVER_TOKEN")
+	log.Printf("agent backend: pi (%s)", agentServerURL)
 
-	// Resolve Anthropic API key: DB setting takes priority, then env var.
-	anthropicKey, _ := authStore.GetSetting("anthropic_api_key")
-	if anthropicKey == "" {
-		anthropicKey = os.Getenv("ANTHROPIC_API_KEY")
+	// agent-server owns project runtimes; appx registers/removes projects through it.
+	pm.Agent = agentserver.NewClient(agentServerURL, agentServerToken)
+	// Best-effort: re-register known projects so existing projects work and an
+	// agent-server restart is transparent. Idempotent on the agent-server side.
+	if err := pm.ReconcileAgentProjects(context.Background()); err != nil {
+		log.Printf("warning: agent-server project reconcile incomplete: %v", err)
 	}
-
-	// Start OpenCode polling in background — does not block server startup.
-	go func() {
-		pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer pollCancel()
-		if err := ocClient.InjectAPIKey(pollCtx, 2*time.Second, anthropicKey); err != nil {
-			log.Printf("opencode: startup polling failed: %v", err)
-		}
-	}()
 
 	webFS, err := fs.Sub(webEmbed, "web/dist")
 	if err != nil {
@@ -191,22 +183,23 @@ func main() {
 	localManager := terminal.NewLocalManager(512 * 1024) // 512 KB ring buffer
 
 	if err := server.Run(server.Config{
-		Port:            *port,
-		InternalsDir:    internalsDir,
-		DB:              database,
-		AuthStore:       authStore,
-		ProjectManager:  pm,
-		WebFS:           webFS,
-		TLSHosts:        hosts,
-		Domain:          *domain,
-		CloudflareToken: os.Getenv("CLOUDFLARE_API_TOKEN"),
-		HTTPMode:        *httpMode,
-		BaseDomain:      baseDomain,
-		HostAliases:     hosts,
-		OpenCodeClient:  ocClient,
-		EgressStore:     egressStore,
-		EgressPending:   pendingRegistry,
-		LocalManager:    localManager,
+		Port:             *port,
+		InternalsDir:     internalsDir,
+		DB:               database,
+		AuthStore:        authStore,
+		ProjectManager:   pm,
+		WebFS:            webFS,
+		TLSHosts:         hosts,
+		Domain:           *domain,
+		CloudflareToken:  os.Getenv("CLOUDFLARE_API_TOKEN"),
+		HTTPMode:         *httpMode,
+		BaseDomain:       baseDomain,
+		HostAliases:      hosts,
+		AgentServerURL:   agentServerURL,
+		AgentServerToken: agentServerToken,
+		EgressStore:      egressStore,
+		EgressPending:    pendingRegistry,
+		LocalManager:     localManager,
 	}); err != nil {
 		log.Fatal(err)
 	}

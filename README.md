@@ -1,10 +1,10 @@
 # Appx
 
-Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents powered by [OpenCode](https://github.com/anomalyco/opencode).
+Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents powered by Pi.
 
 ## What it does
 
-Appx is a management shell for running OpenCode agents on a remote server. It provides authentication, TLS termination, a web dashboard, and a reverse proxy — so you can manage projects, chat with agents, and access agent-built apps from a browser over HTTPS.
+Appx is a management shell for running coding agents on a remote server. It provides authentication, TLS termination, a web dashboard, and a reverse proxy — so you can manage projects, chat with agents, and access agent-built apps from a browser over HTTPS.
 
 ## Architecture
 
@@ -13,13 +13,17 @@ Browser
   └── HTTPS (single port)
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
-        ├── /api/opencode/* Reverse proxy → OpenCode server
+        ├── /api/pi/*       → agent-server /v1 mirror (agent-chat-ui SDK; project-scoped sessions + models)
+        ├── /api/agent/*    → Pi agent-server shared auth/model proxy
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
-Everything is a single Go binary. The React frontend is compiled and embedded at build time. State lives in a SQLite database on disk.
+Appx itself is a single Go binary. The React frontend is compiled and embedded
+at build time. State lives in a SQLite database on disk.
 
-OpenCode runs as a **separate process** on `localhost:4096` and handles all AI agent work (sessions, tool execution, file editing, terminal). Appx proxies requests to it and adds auth + TLS on top.
+Pi is installed as the default agent runtime. systemd runs `agent-server` on
+`localhost:4001`; agent-server owns project identity, directories, and sessions
+while sharing one set of Pi credentials, and Appx proxies session traffic to it.
 
 **Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
 
@@ -81,9 +85,7 @@ If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes),
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, OpenCode, Claude Code, uv), sets up systemd services, starts everything, and runs a verification suite.
-
-During Opencode installation you might be prompted "opencode is installed to /usr/local/bin/opencode and may be managed by a package manager". Select `Install anyways? Yes`
+Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and agent-server), sets up systemd services, starts everything, and runs a verification suite. The Appx UI proxies project agent sessions to project-scoped `agent-server` runtimes and proxies provider-auth, subscription login, and custom-provider requests to shared Pi agent settings at `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`). The Pi agent service runs with `NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://127.0.0.1:9080`, and `NO_PROXY=localhost,127.0.0.1`, so provider traffic goes through the Appx egress allowlist while local agent traffic stays on loopback.
 
 On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
 
@@ -93,7 +95,8 @@ Bootstrap installs these tools system-wide so agents can use them in the termina
 - **Go** — compiled from the version in `go.mod`
 - **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
 - **uv** — Python version and package management (self-update: `uv self update`)
-- **OpenCode** — AI agent backend (pinned version in `deploy/opencode-version`)
+- **Pi** — AI coding agent CLI/SDK (pinned version in `deploy/pi-version`)
+- **agent-server** — separate Appx org service that exposes Pi sessions over HTTP/SSE for the Agent tab
 - **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
 
 ### Updating appx
@@ -105,11 +108,11 @@ cd /srv/appx
 task server:deploy
 ```
 
-Pulls latest code, rebuilds, installs the binary, updates OpenCode to the pinned version, and restarts both services.
+Pulls latest code, rebuilds, installs the binary, updates Pi/agent-server to the pinned versions, and restarts the needed services.
 
-### Updating OpenCode version
+### Updating Pi version
 
-Edit `deploy/opencode-version` to the new version, then:
+Edit `deploy/pi-version` to the new version, then:
 
 ```bash
 cd /srv/appx
@@ -135,8 +138,8 @@ Checks users, permissions, isolation, tools, service files, and runtime. Exits 0
 ### Troubleshoot
 
 ```bash
-journalctl -u appx -f          # appx logs
-journalctl -u opencode -f      # opencode logs
+journalctl -u appx -f            # appx logs
+journalctl -u agent-server -f    # Pi agent-server logs
 ```
 
 ### Deploy scripts
@@ -144,18 +147,52 @@ journalctl -u opencode -f      # opencode logs
 | File / Script                   | When             | What                                                       |
 | ------------------------------- | ---------------- | ---------------------------------------------------------- |
 | `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
-| `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, opencode config |
-| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, OpenCode (pinned), Claude Code, uv         |
-| `deploy/opencode.json`          | Model changes    | Default OpenCode model config (copied to opencode home)    |
-| `deploy/opencode-version`       | Version pin      | Pinned OpenCode version installed by tools-install         |
+| `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, agent config    |
+| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Pi, agent-server, Claude Code, uv          |
+| `deploy/agent-server.service`   | Pi backend       | Systemd unit for project-scoped Pi session service         |
+| `deploy/pi-version`             | Version pin      | Pinned Pi version installed by tools-install               |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
 
 ## Local development
 
-OpenCode must be running before starting appx:
+### Temporary hack: link the `agent-chat` SDK locally
+
+The Agent tab UI is provided by the `@appx-org/agent-chat-ui` package. Until that
+package is published to GitHub Packages, `web/package.json` links it from a
+**sibling checkout** via a `file:` dependency (`file:../../agent-chat`), so the
+`agent-chat` repo must be cloned next to `appx` (both under the same parent):
+
+```text
+<parent>/
+├── appx/         ← this repo
+└── agent-chat/   ← github.com/appx-org/agent-chat
+```
 
 ```bash
-opencode serve --hostname 127.0.0.1 --port 4096
+# one-time, beside your appx checkout
+git clone https://github.com/appx-org/agent-chat.git ../agent-chat
+# the package ships TypeScript source consumed directly by appx's Vite build,
+# so its own deps must be installed once for the symlinked import to resolve
+cd ../agent-chat && npm install && cd -
+```
+
+`task web` / `task build` then follow the symlink and compile the SDK source as
+part of the frontend bundle. Vite dedupes React (see `web/vite.config.ts`) so
+the symlink can't pull a second React copy. When the package is published this
+`file:` spec swaps back to a semver range and the clone step goes away.
+
+### Run agent-server, then appx
+
+Run the sibling `agent-server` before starting appx. It needs `WORKSPACE_DIR`
+pointed at the **same** directory appx uses for projects (co-located dev), since
+agent-server owns the project directories and appx's subdomain proxy/terminal
+read them from that shared path:
+
+```bash
+cd ../agent-server
+WORKSPACE_DIR=/path/to/appx-data/projects \
+AGENT_SERVER_PORT=4001 \
+npm run dev
 ```
 
 Then start appx with `--host 127.0.0.1.sslip.io` so that subdomain routing and session cookies work correctly across project subdomains. Plain `localhost` has inconsistent cookie-sharing behaviour for subdomains across browsers.
@@ -178,6 +215,27 @@ All state lives in the data directory (configured during bootstrap, default `/va
 | ----------------------------- | ------------------------- | --------- |
 | SQLite DB, TLS certs, secrets | `{data}/.appx-internals/` | appx only |
 | Project directories           | `{data}/projects/`        | shared    |
+
+Each new project's directory is created and owned by `agent-server` (under its
+`WORKSPACE_DIR`, which is the shared `{data}/projects/` path in a co-located
+deployment). The project's Pi harness (`{data}/projects/<name>/.pi/`) is owned by
+agent-server and currently starts empty — appx no longer scaffolds a prompt,
+guardrail extension, or egress skill into it (see
+`.superpowers/specs/2026-06-09-project-ownership-and-agent-chat-integration-adr.md`).
+Reintroducing harness defaults/templates is tracked as future work.
+
+Pi credentials are configured from Settings. Built-in providers can use stored
+API keys or Pi subscription auth where the provider supports it, and custom
+providers such as LiteLLM are written to the agent service user's
+`models.json` without exposing secret values back to the browser.
+
+The Agent tab is the `@appx-org/agent-chat-ui` SDK talking to Appx's same-origin
+`/api/pi/*` mirror, which proxies the `agent-server` `/v1` session contract
+(keeping the bearer token server-side). `agent-server` turns all supported Pi
+providers into the same session HTTP/SSE contract, so the SDK handles Pi
+`message_update` events by `contentIndex` for text and tool-call blocks. Pi
+extension UI requests, including Appx guardrail approvals for risky commands, are
+delivered over the same session stream and answered through the mirror.
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 
@@ -232,11 +290,11 @@ Bootstrap creates two OS users with a shared `projects` group:
 
 ```
 appx      — runs the appx server, owns DB and TLS certs
-opencode  — runs OpenCode, cannot access appx data
+appx-agent — isolated agent user for Pi tooling, cannot access appx data
 projects  — shared group, both users read/write project directories
 ```
 
-Directory permissions prevent OpenCode (and any agent it spawns) from accessing the appx database, TLS keys, or binary. Project directories use setgid so files created by either user are accessible to both.
+Directory permissions prevent agent tooling from accessing the appx database, TLS keys, or binary. Project directories use setgid so files created by either user are accessible to both.
 
 ## Development
 

@@ -1,17 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { AgentChat, AgentChatProvider, createAgentClient } from '@appx-org/agent-chat-ui';
 import {
   getProject,
   getServerConfig,
   logout,
   type Project as ProjectType,
 } from '../api/client';
-import { SessionList, ChatPanel } from '../components/agent';
 import Terminal from '../components/Terminal';
 
+/**
+ * Stable theming overrides for the embedded agent chat. Defined at module scope
+ * so the object identity never changes across renders — passing an inline
+ * literal would recreate the provider's client/store (and drop the live
+ * session) on every re-render.
+ */
+const CHAT_LABELS = { agentName: 'PI AGENT' };
+
 /** Project is the full-page project view with tabbed Agent/Terminal interface.
- *  The Agent tab uses the OpenCode SDK for sessions and chat. The Terminal tab
- *  connects to OpenCode's PTY. No container lifecycle -- OpenCode runs as systemd. */
+ *  The Agent tab uses Pi. The Terminal tab is a local PTY rooted in the
+ *  project directory. */
 export default function Project() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -20,8 +28,23 @@ export default function Project() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'agent' | 'terminal'>('agent');
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [baseDomain, setBaseDomain] = useState('localhost');
+
+  // One stable client for the whole project view. The agent-chat SDK talks to
+  // the same-origin `/api/pi` mirror, which proxies the agent-server `/v1`
+  // contract (keeping the bearer token server-side). On 401 we redirect to the
+  // login page, matching the rest of the app.
+  const agentClient = useMemo(
+    () =>
+      createAgentClient({
+        baseUrl: '/api/pi',
+        pathPrefix: '/v1',
+        onUnauthorized: () => {
+          window.location.href = '/login';
+        },
+      }),
+    [],
+  );
 
   const fetchProject = useCallback(async () => {
     if (!id) return;
@@ -43,7 +66,9 @@ export default function Project() {
   useEffect(() => {
     fetchProject();
     getServerConfig()
-      .then((cfg) => setBaseDomain(cfg.baseDomain || 'localhost'))
+      .then((cfg) => {
+        setBaseDomain(cfg.baseDomain || 'localhost');
+      })
       .catch(() => {});
   }, [fetchProject]);
 
@@ -109,20 +134,11 @@ export default function Project() {
 
       <div style={styles.main}>
         {activeTab === 'agent' ? (
-          <div style={styles.agentLayout}>
-            <SessionList
-              projectDir={projectDir}
-              activeSessionId={activeSessionId}
-              onSelectSession={setActiveSessionId}
-            />
-            {activeSessionId ? (
-              <ChatPanel sessionId={activeSessionId} projectDir={projectDir} />
-            ) : (
-              <div style={styles.centered}>
-                <span style={styles.statusLabel}>Select or create a session</span>
-              </div>
-            )}
-          </div>
+          // agent-server addresses projects by their slug id, which equals the
+          // appx project *name* (appx names already satisfy the slug grammar).
+          <AgentChatProvider client={agentClient} labels={CHAT_LABELS}>
+            <AgentChat projectId={project.name} />
+          </AgentChatProvider>
         ) : (
           <Terminal cwd={projectDir} />
         )}
@@ -147,7 +163,6 @@ const styles: Record<string, React.CSSProperties> = {
   tab: { padding: '6px 16px', cursor: 'pointer', border: '1px solid transparent', borderRadius: 4, fontSize: 13, color: 'var(--muted)', background: 'transparent' },
   tabActive: { padding: '6px 16px', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, color: 'var(--text)', background: 'var(--surface)' },
   main: { flex: 1, display: 'flex', minHeight: 0 },
-  agentLayout: { flex: 1, display: 'flex', minHeight: 0 },
   centered: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 },
   statusLabel: { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--muted)', letterSpacing: '0.04em' },
   errorText: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--red)', maxWidth: 400, textAlign: 'center' as const, lineHeight: 1.5 },

@@ -74,7 +74,7 @@ export default function Egress() {
 
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>Allowlist</h3>
-          <p style={styles.description}>Destinations the OpenCode agent can reach. Format: <code style={styles.code}>host:port</code></p>
+          <p style={styles.description}>Destinations the Pi agent can reach. Format: <code style={styles.code}>host:port</code></p>
           {error && <div style={styles.errorMsg}>{error}</div>}
           {success && <div style={styles.successMsg}>{success}</div>}
           <div style={styles.allowlistItems}>

@@ -19,7 +19,6 @@ import (
 	"github.com/libdns/cloudflare"
 	"github.com/neuromaxer/appx/internal/auth"
 	"github.com/neuromaxer/appx/internal/egress"
-	"github.com/neuromaxer/appx/internal/opencode"
 	"github.com/neuromaxer/appx/internal/project"
 	"github.com/neuromaxer/appx/internal/terminal"
 	appxtls "github.com/neuromaxer/appx/internal/tls"
@@ -28,22 +27,23 @@ import (
 // Config holds all dependencies needed to start the HTTPS server.
 // It is constructed in main() and passed to Run().
 type Config struct {
-	Port            int
-	InternalsDir    string // path to .appx-internals (DB, TLS certs)
-	DB              *sql.DB
-	AuthStore       *auth.Store
-	ProjectManager  *project.Manager
-	WebFS           fs.FS
-	TLSHosts        []string
-	Domain          string
-	CloudflareToken string
-	HTTPMode        bool   // true = plain HTTP, locked to localhost
-	BaseDomain      string // "localhost" in HTTP mode, Domain value in production
-	HostAliases     []string // additional hosts that serve the dashboard (e.g. server IP or hostname)
-	OpenCodeClient  *opencode.Client
-	EgressStore     *egress.Store
-	EgressPending   *egress.PendingRegistry
-	LocalManager    *terminal.LocalManager
+	Port             int
+	InternalsDir     string // path to .appx-internals (DB, TLS certs)
+	DB               *sql.DB
+	AuthStore        *auth.Store
+	ProjectManager   *project.Manager
+	WebFS            fs.FS
+	TLSHosts         []string
+	Domain           string
+	CloudflareToken  string
+	HTTPMode         bool     // true = plain HTTP, locked to localhost
+	BaseDomain       string   // "localhost" in HTTP mode, Domain value in production
+	HostAliases      []string // additional hosts that serve the dashboard (e.g. server IP or hostname)
+	AgentServerURL   string
+	AgentServerToken string
+	EgressStore      *egress.Store
+	EgressPending    *egress.PendingRegistry
+	LocalManager     *terminal.LocalManager
 }
 
 // Run starts the HTTPS server and blocks until it receives SIGINT/SIGTERM or
@@ -82,10 +82,12 @@ func Run(cfg Config) error {
 	}()
 
 	handler := NewRouter(a, cfg.ProjectManager, cfg.WebFS, RouterConfig{
-		HTTPMode:    cfg.HTTPMode,
-		BaseDomain:  cfg.BaseDomain,
-		HostAliases: cfg.HostAliases,
-	}, cfg.OpenCodeClient, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
+		HTTPMode:         cfg.HTTPMode,
+		BaseDomain:       cfg.BaseDomain,
+		HostAliases:      cfg.HostAliases,
+		AgentServerURL:   cfg.AgentServerURL,
+		AgentServerToken: cfg.AgentServerToken,
+	}, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
 
 	if cfg.HTTPMode {
 		return runHTTP(cfg, handler)
@@ -177,8 +179,6 @@ func runHTTP(cfg Config, handler http.Handler) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
-
-
 
 	return serveHTTP(srv, cfg.Port)
 }

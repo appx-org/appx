@@ -29,8 +29,8 @@ func New(store *Store) *Auth {
 }
 
 // AuthRequiredHeader is set on 401 responses from the auth middleware so that
-// API clients can distinguish an appx session expiry from an OpenCode backend
-// error. The frontend redirects to /login when it sees this header on a 401.
+// API clients can distinguish an appx session expiry from an upstream agent or
+// app error. The frontend redirects to /login when it sees this header on a 401.
 const AuthRequiredHeader = "X-Appx-Auth"
 
 // Middleware returns an HTTP middleware that enforces authentication.

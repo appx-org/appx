@@ -4,18 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
 	"github.com/neuromaxer/appx/internal/auth"
 	"github.com/neuromaxer/appx/internal/egress"
-	"github.com/neuromaxer/appx/internal/opencode"
 	"github.com/neuromaxer/appx/internal/project"
 	"github.com/neuromaxer/appx/internal/terminal"
 )
@@ -23,18 +20,18 @@ import (
 // RouterConfig holds runtime configuration that affects routing behaviour.
 // Passed to NewRouter so middleware can adapt to the deployment mode.
 type RouterConfig struct {
-	HTTPMode     bool     // true = plain HTTP dev mode, affects security headers
-	BaseDomain   string   // base domain for subdomain routing
-	HostAliases  []string // additional hostnames/IPs that also serve the dashboard (e.g. server IP)
-	OpenCodeURL  string   // URL of the OpenCode server (default "http://localhost:4096")
+	HTTPMode         bool     // true = plain HTTP dev mode, affects security headers
+	BaseDomain       string   // base domain for subdomain routing
+	HostAliases      []string // additional hostnames/IPs that also serve the dashboard (e.g. server IP)
+	AgentServerURL   string   // URL of the Pi agent-server (default "http://127.0.0.1:4001")
+	AgentServerToken string   // optional bearer token for Pi agent-server
 }
 
 // NewRouter builds the top-level HTTP handler. All requests go through auth
 // middleware (except POST /api/login which is public and rate-limited).
-// oc may be nil (in tests or when OpenCode is not configured).
 // es must not be nil; pass egress.NewStore(db) from the caller.
 // lm must not be nil; pass terminal.NewLocalManager(bufSize) from the caller.
-func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig, oc *opencode.Client, es *egress.Store, ep *egress.PendingRegistry, lm *terminal.LocalManager) http.Handler {
+func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig, es *egress.Store, ep *egress.PendingRegistry, lm *terminal.LocalManager) http.Handler {
 	mux := http.NewServeMux()
 
 	// Public API routes (no auth) — rate limited
@@ -49,9 +46,6 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	api.HandleFunc("GET /api/projects/{id}", handleGetProject(pm, hc))
 	api.HandleFunc("DELETE /api/projects/{id}", handleDeleteProject(pm))
 	api.HandleFunc("PUT /api/settings/password", handleChangePassword(a))
-	api.HandleFunc("GET /api/settings/api-key", handleGetAPIKeyStatus(a.Store))
-	api.HandleFunc("PUT /api/settings/api-key", handleSetAPIKey(a.Store, oc))
-	api.HandleFunc("DELETE /api/settings/api-key", handleDeleteAPIKey(a.Store, oc))
 	api.HandleFunc("GET /api/settings/terminal-buffer-size", handleGetTerminalBufferSize(a.Store))
 	api.HandleFunc("PUT /api/settings/terminal-buffer-size", handleSetTerminalBufferSize(a.Store))
 	api.HandleFunc("GET /api/config", handleGetConfig(rcfg.BaseDomain))
@@ -64,6 +58,20 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 		api.HandleFunc("POST /api/egress/pending/{id}/approve", handleApproveEgressRequest(ep))
 		api.HandleFunc("POST /api/egress/pending/{id}/deny", handleDenyEgressRequest(ep))
 	}
+	agentServerURL := rcfg.AgentServerURL
+	if agentServerURL == "" {
+		agentServerURL = "http://127.0.0.1:4001"
+	}
+	agentGlobalProxy := agentServerGlobalProxyHandler(agentServerURL, rcfg.AgentServerToken)
+	api.Handle("GET /api/agent/{agentPath...}", agentGlobalProxy)
+	api.Handle("POST /api/agent/{agentPath...}", agentGlobalProxy)
+	api.Handle("PUT /api/agent/{agentPath...}", agentGlobalProxy)
+	api.Handle("DELETE /api/agent/{agentPath...}", agentGlobalProxy)
+	agentProxy := agentServerProxyHandler(pm, agentServerURL, rcfg.AgentServerToken)
+	api.Handle("GET /api/projects/{id}/agent/{agentPath...}", agentProxy)
+	api.Handle("POST /api/projects/{id}/agent/{agentPath...}", agentProxy)
+	api.Handle("PATCH /api/projects/{id}/agent/{agentPath...}", agentProxy)
+	api.Handle("DELETE /api/projects/{id}/agent/{agentPath...}", agentProxy)
 	mux.Handle("/api/", limitBody(a.Middleware(requireJSON(api))))
 
 	// Shell (local PTY) routes — outside the requireJSON api mux because the
@@ -72,16 +80,19 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	mux.Handle("PUT /api/shell/{id}", a.Middleware(limitBody(requireJSON(http.HandlerFunc(handleShellResize(lm))))))
 	mux.Handle("GET /api/shell/{id}/connect", a.Middleware(http.HandlerFunc(handleShellConnect(lm))))
 
-	// OpenCode health endpoint — registered on the outer mux before the /api/opencode/
-	// proxy so the more-specific pattern takes precedence. Protected by auth middleware.
-	mux.Handle("GET /api/opencode/health", a.Middleware(http.HandlerFunc(handleOpenCodeHealth(oc))))
-
-	// OpenCode API proxy — strips /api/opencode prefix, forwards to OpenCode server.
-	ocURL := rcfg.OpenCodeURL
-	if ocURL == "" {
-		ocURL = "http://localhost:4096"
-	}
-	mux.Handle("/api/opencode/", a.Middleware(openCodeProxyHandler(ocURL)))
+	// agent-chat SDK gateway: same-origin 1:1 mirror of the agent-server /v1
+	// contract. Mounted on the top-level mux (auth + body limit) rather than the
+	// requireJSON-wrapped api mux, because the SDK issues legitimate *bodyless*
+	// POSTs (create session, abort) that requireJSON would reject with 415. The
+	// route is still CSRF-safe: state-changing requests carry the SameSite=Lax
+	// session cookie (not sent on cross-site POST) and auth runs first, so a
+	// forged cross-origin request is rejected with 401 before reaching the proxy.
+	// More-specific patterns win over the "/api/" mux below.
+	agentMirror := agentServerMirrorHandler(pm, agentServerURL, rcfg.AgentServerToken)
+	mux.Handle("GET /api/pi/{piPath...}", a.Middleware(agentMirror))
+	mux.Handle("POST /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
+	mux.Handle("PATCH /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
+	mux.Handle("DELETE /api/pi/{piPath...}", a.Middleware(agentMirror))
 
 	// React SPA fallback
 	fileServer := http.FileServerFS(webFS)
@@ -171,49 +182,6 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 			}
 			proxy.ServeHTTP(w, r)
 		})).ServeHTTP(w, r)
-	})
-}
-
-// openCodeProxyHandler returns an http.Handler that reverse-proxies requests to
-// the OpenCode server. The /api/opencode prefix is stripped before forwarding.
-// The Cookie header is stripped to prevent the appx session cookie from reaching
-// OpenCode. FlushInterval=-1 enables streaming for SSE responses. A single
-// ReverseProxy instance is reused across requests for connection pooling.
-//
-// The per-request write deadline is disabled before proxying because OpenCode
-// exposes long-lived SSE event streams (agent subscriptions) and WebSocket PTY
-// tunnels that outlive the server's 60s WriteTimeout. ReadHeaderTimeout still
-// guards against slow-header attacks on inbound requests.
-func openCodeProxyHandler(backendURL string) http.Handler {
-	target, err := url.Parse(backendURL)
-	if err != nil {
-		log.Fatalf("invalid OpenCode URL %q: %v", backendURL, err)
-	}
-
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			// Strip /api/opencode prefix and canonicalize to prevent path
-			// traversal against the backend. Clear RawPath so the proxy uses
-			// the cleaned Path.
-			req.URL.Path = path.Clean(strings.TrimPrefix(req.URL.Path, "/api/opencode"))
-			req.URL.RawPath = ""
-			if req.URL.Path == "." {
-				req.URL.Path = "/"
-			}
-			req.URL.Scheme = target.Scheme
-			req.URL.Host = target.Host
-			req.Host = target.Host
-			req.Header.Del("Cookie")
-		},
-		FlushInterval: -1,
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Remove the write deadline for this connection. SSE streams and
-		// WebSocket tunnels are indefinitely long — the 60s WriteTimeout on
-		// the http.Server would otherwise cut them with ERR_INCOMPLETE_CHUNKED_ENCODING.
-		http.NewResponseController(w).SetWriteDeadline(time.Time{})
-		proxy.ServeHTTP(w, r)
 	})
 }
 

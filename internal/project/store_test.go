@@ -8,7 +8,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// setupTestDB creates an in-memory SQLite database with the full schema (migrations 1-4).
+// setupTestDB creates an in-memory SQLite database with the full project schema.
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
@@ -31,8 +31,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 			last_error TEXT,
 			resources TEXT,
 			container_secret TEXT,
-			assigned_port INTEGER,
-			opencode_project_id TEXT
+			assigned_port INTEGER
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_assigned_port ON projects(assigned_port) WHERE assigned_port IS NOT NULL;
 	`)
@@ -236,29 +235,6 @@ func TestGetByName(t *testing.T) {
 	_, err = store.GetByName("nonexistent")
 	if err != ErrNotFound {
 		t.Errorf("want ErrNotFound, got %v", err)
-	}
-}
-
-func TestSetOpenCodeProjectID(t *testing.T) {
-	store := NewStore(setupTestDB(t))
-	p, _ := store.Create("my-app")
-
-	err := store.SetOpenCodeProjectID(p.ID, "oc-abc123")
-	if err != nil {
-		t.Fatalf("SetOpenCodeProjectID: %v", err)
-	}
-
-	got, _ := store.Get(p.ID)
-	if got.OpenCodeProjectID != "oc-abc123" {
-		t.Errorf("expected 'oc-abc123', got %q", got.OpenCodeProjectID)
-	}
-}
-
-func TestSetOpenCodeProjectID_NotFound(t *testing.T) {
-	store := NewStore(setupTestDB(t))
-	err := store.SetOpenCodeProjectID("nonexistent", "oc-abc123")
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 

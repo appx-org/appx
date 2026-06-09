@@ -28,6 +28,7 @@ if [ -f "$ENV_FILE" ]; then
   fi
 fi
 echo "data directory: $DATA_DIR"
+echo "agent backend: pi"
 echo ""
 
 # expect_ok: command should succeed
@@ -71,23 +72,23 @@ echo "=== 1. Users and groups ==="
 # ---------------------------------------------------------------------------
 
 expect_ok   "appx user exists"                id appx
-expect_ok   "opencode user exists"            id opencode
+expect_ok   "appx-agent user exists"          id appx-agent
 expect_ok   "projects group exists"           getent group projects
 if id -nG appx | grep -qw projects >/dev/null 2>&1; then
   echo "  PASS  appx is in projects group"; PASS=$((PASS + 1))
 else
   echo "  FAIL  appx is in projects group"; FAIL=$((FAIL + 1))
 fi
-if id -nG opencode | grep -qw projects >/dev/null 2>&1; then
-  echo "  PASS  opencode is in projects group"; PASS=$((PASS + 1))
+if id -nG appx-agent | grep -qw projects >/dev/null 2>&1; then
+  echo "  PASS  appx-agent is in projects group"; PASS=$((PASS + 1))
 else
-  echo "  FAIL  opencode is in projects group"; FAIL=$((FAIL + 1))
+  echo "  FAIL  appx-agent is in projects group"; FAIL=$((FAIL + 1))
 fi
 
 expect_eq "appx shell is /bin/bash" \
   "$(getent passwd appx | cut -d: -f7)" "/bin/bash"
-expect_eq "opencode shell is /bin/bash" \
-  "$(getent passwd opencode | cut -d: -f7)" "/bin/bash"
+expect_eq "appx-agent shell is /bin/bash" \
+  "$(getent passwd appx-agent | cut -d: -f7)" "/bin/bash"
 expect_eq "appx home dir is data dir" \
   "$(getent passwd appx | cut -d: -f6)" "$DATA_DIR"
 
@@ -112,25 +113,24 @@ expect_ok "projects dir exists"      test -d "$DATA_DIR/projects"
 expect_eq "projects dir is appx:projects 2770" \
   "$(stat -c '%U:%G %a' "$DATA_DIR/projects" 2>/dev/null)" "appx:projects 2770"
 
-expect_ok "opencode home exists"     test -d /home/opencode
-expect_eq "opencode home is opencode:opencode 700" \
-  "$(stat -c '%U:%G %a' /home/opencode 2>/dev/null)" "opencode:opencode 700"
-expect_ok "opencode config sets anthropic model" \
-  grep -q '"anthropic/' /home/opencode/.config/opencode/opencode.json
-expect_ok "opencode AGENTS.md exists" \
-  test -f /home/opencode/.config/opencode/AGENTS.md
+expect_ok "appx-agent home exists"   test -d /home/appx-agent
+expect_eq "appx-agent home is appx-agent:appx-agent 700" \
+  "$(stat -c '%U:%G %a' /home/appx-agent 2>/dev/null)" "appx-agent:appx-agent 700"
+expect_ok "pi agent dir exists"      test -d /home/appx-agent/.pi/agent
+expect_eq "pi agent dir is appx-agent:appx-agent 700" \
+  "$(stat -c '%U:%G %a' /home/appx-agent/.pi/agent 2>/dev/null)" "appx-agent:appx-agent 700"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== 3. Isolation: opencode user ==="
+echo "=== 3. Isolation: appx-agent user ==="
 # ---------------------------------------------------------------------------
 
-expect_deny "opencode cannot list internals dir"    su -s /bin/bash opencode -c "ls $DATA_DIR/.appx-internals/"
-expect_deny "opencode cannot read DB file"          su -s /bin/bash opencode -c "cat $DATA_DIR/.appx-internals/appx.db"
-expect_deny "opencode cannot write to internals"    su -s /bin/bash opencode -c "touch $DATA_DIR/.appx-internals/hack"
-expect_deny "opencode cannot execute appx binary"   su -s /bin/bash opencode -c "/usr/local/bin/appx --version"
-expect_ok   "opencode can list projects"            su -s /bin/bash opencode -c "ls $DATA_DIR/projects/"
-expect_ok   "opencode can create file in projects"  su -s /bin/bash opencode -c "touch $DATA_DIR/projects/.verify-oc && rm $DATA_DIR/projects/.verify-oc"
+expect_deny "appx-agent cannot list internals dir"    su -s /bin/bash appx-agent -c "ls $DATA_DIR/.appx-internals/"
+expect_deny "appx-agent cannot read DB file"          su -s /bin/bash appx-agent -c "cat $DATA_DIR/.appx-internals/appx.db"
+expect_deny "appx-agent cannot write to internals"    su -s /bin/bash appx-agent -c "touch $DATA_DIR/.appx-internals/hack"
+expect_deny "appx-agent cannot execute appx binary"   su -s /bin/bash appx-agent -c "/usr/local/bin/appx --version"
+expect_ok   "appx-agent can list projects"            su -s /bin/bash appx-agent -c "ls $DATA_DIR/projects/"
+expect_ok   "appx-agent can create file in projects"  su -s /bin/bash appx-agent -c "touch $DATA_DIR/projects/.verify-agent && rm $DATA_DIR/projects/.verify-agent"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -139,7 +139,7 @@ echo "=== 4. Isolation: appx user ==="
 
 expect_ok   "appx can list internals dir"           su -s /bin/bash appx -c "ls $DATA_DIR/.appx-internals/"
 expect_ok   "appx can create file in projects"      su -s /bin/bash appx -c "touch $DATA_DIR/projects/.verify-ax && rm $DATA_DIR/projects/.verify-ax"
-expect_deny "appx cannot read opencode home"        su -s /bin/bash appx -c "ls /home/opencode/"
+expect_deny "appx cannot read appx-agent home"      su -s /bin/bash appx -c "ls /home/appx-agent/"
 expect_deny "appx cannot overwrite its own binary"  su -s /bin/bash appx -c "cp /usr/local/bin/appx /usr/local/bin/appx.bak"
 
 # ---------------------------------------------------------------------------
@@ -162,17 +162,26 @@ expect_ok "env file exists"              test -f /etc/appx/appx.env
 expect_eq "env file is root:root 600" \
   "$(stat -c '%U:%G %a' /etc/appx/appx.env 2>/dev/null)" "root:root 600"
 expect_ok "appx.service exists"          test -f /etc/systemd/system/appx.service
-expect_ok "opencode.service exists"      test -f /etc/systemd/system/opencode.service
 expect_ok "appx service enabled"         systemctl is-enabled appx
-expect_ok "opencode service enabled"     systemctl is-enabled opencode
-expect_ok "opencode ExecStart is /usr/local/bin" \
-  grep -q "ExecStart=/usr/local/bin/opencode" /etc/systemd/system/opencode.service
+expect_deny "legacy opencode.service absent" test -f /etc/systemd/system/opencode.service
+expect_ok "agent-server.service exists"      test -f /etc/systemd/system/agent-server.service
+expect_ok "agent-server service enabled"     systemctl is-enabled agent-server
+expect_ok "agent-server mode is multi" \
+  grep -q "AGENT_SERVER_MODE=multi" /etc/systemd/system/agent-server.service
+expect_ok "agent-server ExecStart is /usr/local/bin" \
+  grep -q "ExecStart=/usr/local/bin/agent-server" /etc/systemd/system/agent-server.service
+expect_ok "agent-server uses Node env proxy support" \
+  grep -q "NODE_USE_ENV_PROXY=1" /etc/systemd/system/agent-server.service
+expect_ok "agent-server routes HTTPS through egress proxy" \
+  grep -q "HTTPS_PROXY=http://127.0.0.1:9080" /etc/systemd/system/agent-server.service
+expect_ok "agent-server bypasses proxy for localhost" \
+  grep -q "NO_PROXY=localhost,127.0.0.1" /etc/systemd/system/agent-server.service
 expect_ok "appx ExecStart is /usr/local/bin" \
   grep -q "ExecStart=/usr/local/bin/appx" /etc/systemd/system/appx.service
 expect_ok "appx runs as appx user" \
   grep -q "User=appx" /etc/systemd/system/appx.service
-expect_ok "opencode runs as opencode user" \
-  grep -q "User=opencode" /etc/systemd/system/opencode.service
+expect_ok "agent-server runs as appx-agent user" \
+  grep -q "User=appx-agent" /etc/systemd/system/agent-server.service
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -186,18 +195,20 @@ EXPECTED_NODE_MAJOR="24"
 ACTUAL_NODE_MAJOR=$(/usr/local/bin/node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo "0")
 expect_eq "node major version is $EXPECTED_NODE_MAJOR" \
   "$ACTUAL_NODE_MAJOR" "$EXPECTED_NODE_MAJOR"
-expect_ok "opencode binary in /usr/local/bin" test -x /usr/local/bin/opencode
+expect_deny "legacy opencode binary absent from /usr/local/bin" test -x /usr/local/bin/opencode
+expect_ok "agent-server binary in /usr/local/bin" test -x /usr/local/bin/agent-server
+expect_ok "pi binary in /usr/local/bin"       test -x /usr/local/bin/pi
 expect_ok "uv binary in /usr/local/bin"       test -x /usr/local/bin/uv
 
-EXPECTED_OC_VERSION=""
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/opencode-version" ]; then
-  EXPECTED_OC_VERSION=$(cat "$SCRIPT_DIR/opencode-version" | tr -d '[:space:]' | sed 's/^v//')
+EXPECTED_PI_VERSION=""
+if [ -f "$SCRIPT_DIR/pi-version" ]; then
+  EXPECTED_PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
 fi
-if [ -n "$EXPECTED_OC_VERSION" ]; then
-  ACTUAL_OC_VERSION=$(/usr/local/bin/opencode --version 2>/dev/null || echo "unknown")
-  expect_eq "opencode version matches deploy/opencode-version" \
-    "$ACTUAL_OC_VERSION" "$EXPECTED_OC_VERSION"
+if [ -n "$EXPECTED_PI_VERSION" ]; then
+  ACTUAL_PI_VERSION=$(/usr/local/bin/pi --version 2>&1 || echo "unknown")
+  expect_eq "pi version matches deploy/pi-version" \
+    "$ACTUAL_PI_VERSION" "$EXPECTED_PI_VERSION"
 fi
 
 # Claude is optional (requires Node.js) — report status without failing.
@@ -212,18 +223,18 @@ echo ""
 echo "=== 8. Runtime (if services are running) ==="
 # ---------------------------------------------------------------------------
 
-if systemctl is-active --quiet opencode 2>/dev/null; then
-  expect_ok "opencode is running"    systemctl is-active opencode
-  expect_ok "opencode responds on :4096" \
-    curl -sf --max-time 3 http://127.0.0.1:4096/health
-  # Verify it's actually running as the opencode user.
-  OC_PID=$(systemctl show opencode --property=MainPID --value 2>/dev/null)
-  if [ -n "$OC_PID" ] && [ "$OC_PID" != "0" ]; then
-    OC_USER=$(ps -o user= -p "$OC_PID" 2>/dev/null || echo "unknown")
-    expect_eq "opencode process runs as opencode user" "$OC_USER" "opencode"
+expect_deny "legacy opencode service inactive" systemctl is-active opencode
+if systemctl is-active --quiet agent-server 2>/dev/null; then
+  expect_ok "agent-server is running"    systemctl is-active agent-server
+  expect_ok "agent-server responds on :4001" \
+    curl -sf --max-time 3 http://127.0.0.1:4001/v1/healthz
+  AS_PID=$(systemctl show agent-server --property=MainPID --value 2>/dev/null)
+  if [ -n "$AS_PID" ] && [ "$AS_PID" != "0" ]; then
+    AS_USER=$(ps -o user= -p "$AS_PID" 2>/dev/null || echo "unknown")
+    expect_eq "agent-server process runs as appx-agent user" "$AS_USER" "appx-agent"
   fi
 else
-  echo "  SKIP  opencode not running (start with: systemctl start opencode)"
+  echo "  SKIP  agent-server not running (start with: systemctl start agent-server)"
 fi
 
 if systemctl is-active --quiet appx 2>/dev/null; then

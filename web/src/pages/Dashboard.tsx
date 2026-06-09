@@ -3,13 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { getProjects, getServerConfig, logout, type Project } from '../api/client';
 import ProjectCard from '../components/ProjectCard';
 import CreateProjectModal from '../components/CreateProjectModal';
-import OpenCodeStatus from '../components/OpenCodeStatus';
 
 const POLL_INTERVAL = 10000;
 
 /** Dashboard is the main authenticated page. Fetches and displays projects
  *  with app health status. Polls every 10s to detect app start/stop.
- *  Shows OpenCode server health in the header. */
+ *  Shows the Pi agent runtime in the header. */
 export default function Dashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -27,7 +26,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     getServerConfig()
-      .then((cfg) => setBaseDomain(cfg.baseDomain || 'localhost'))
+      .then((cfg) => {
+        setBaseDomain(cfg.baseDomain || 'localhost');
+      })
       .catch(() => {});
     fetchProjects();
     pollRef.current = setInterval(fetchProjects, POLL_INTERVAL);
@@ -39,7 +40,10 @@ export default function Dashboard() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <span style={styles.wordmark}>APPX</span>
-          <OpenCodeStatus />
+          <span style={styles.agentStatus} aria-label="Pi agent runtime">
+            <span style={styles.agentDot} />
+            PI
+          </span>
         </div>
         <div style={styles.headerActions}>
           <button data-btn="new-project" style={styles.newProjectBtn} onClick={() => setShowCreate(true)}>
@@ -90,6 +94,8 @@ const styles: Record<string, React.CSSProperties> = {
   header: { borderBottom: '1px solid var(--border)', padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 16 },
   wordmark: { fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 500, letterSpacing: '0.35em', color: 'var(--text)' },
+  agentStatus: { display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: '0.08em', color: 'var(--green)' },
+  agentDot: { width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 10px rgba(61, 220, 132, 0.45)' },
   headerActions: { display: 'flex', alignItems: 'center', gap: 4 },
   newProjectBtn: { background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 4, padding: '5px 14px', fontSize: 13, cursor: 'pointer' },
   separator: { color: 'var(--subtle)', fontSize: 14, padding: '0 6px', userSelect: 'none' as const },

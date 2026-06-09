@@ -83,17 +83,20 @@ else
 #     APPX_PORT=443
 #     APPX_DOMAIN=app.example.com
 #     CLOUDFLARE_API_TOKEN=your_token_here
+#     APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 #
 # All variables:
 #   APPX_HOST   — server hostname for TLS cert and routing (default: <ip>.sslip.io)
 #   APPX_DATA   — data directory: DB, TLS certs, projects (default: /var/lib/appx)
 #   APPX_PORT   — listen port (default: 443). MUST be open in firewall
+#   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
 #   CLOUDFLARE_API_TOKEN — Cloudflare API token for DNS-01 challenge (optional)
 
 APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
 APPX_PORT=$APPX_PORT
+APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 # APPX_DOMAIN=
 # CLOUDFLARE_API_TOKEN=
 EOF
@@ -113,7 +116,7 @@ STEP="system-setup"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 3. Install tools: node, opencode (pinned), claude, uv.
+# 3. Install tools: node, Pi, agent-server, claude, uv.
 # ---------------------------------------------------------------------------
 
 STEP="tools-install"
@@ -167,13 +170,13 @@ echo ""
 
 STEP="restart-services"
 echo "stopping services..."
-systemctl stop opencode appx 2>/dev/null || true
+systemctl stop agent-server opencode appx 2>/dev/null || true
 sleep 2
 echo "starting services..."
-systemctl start opencode appx
-echo "waiting for services to be ready..."
+systemctl start agent-server appx
+echo "waiting for agent-server to be ready..."
 for i in $(seq 1 10); do
-  curl -sf http://127.0.0.1:4096/health >/dev/null 2>&1 && break
+  curl -sf http://127.0.0.1:4001/v1/healthz >/dev/null 2>&1 && break
   sleep 2
 done
 echo "services started"
@@ -207,5 +210,5 @@ if [ -n "$APPX_HOST_VAL" ]; then
     echo "  Visit: https://${APPX_HOST_VAL}:${APPX_PORT_VAL}"
   fi
 fi
-echo "  Log in and set your Anthropic API key in Settings."
+echo "  Open Settings to configure Pi credentials and models."
 echo "========================================"

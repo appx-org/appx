@@ -3,7 +3,7 @@ import Terminal from '../components/Terminal';
 
 /** Shell renders a full-page direct server PTY terminal.
  *  Accessible at /shell. Uses appx's own /api/shell endpoints — works
- *  independently of OpenCode. */
+ *  independently of the agent runtime. */
 export default function Shell() {
   const navigate = useNavigate();
   return (

@@ -16,8 +16,8 @@ interface TerminalProps {
 }
 
 /** Terminal renders an xterm.js terminal connected to a local PTY via appx's
- *  /api/shell endpoints (creack/pty). No OpenCode dependency — works even when
- *  OpenCode is down. Handles auto-reconnect with exponential backoff, resize,
+ *  /api/shell endpoints (creack/pty). No agent-runtime dependency. Handles
+ *  auto-reconnect with exponential backoff, resize,
  *  ring buffer replay on reconnect, and mobile copy/paste. */
 export default function Terminal({ cwd }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);

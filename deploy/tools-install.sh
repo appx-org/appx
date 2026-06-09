@@ -2,13 +2,14 @@
 # deploy/tools-install.sh — install build and runtime tools system-wide.
 #
 # Must be run as root. Safe to run multiple times (idempotent).
-# Installs everything to /usr/local/bin so all users (appx, opencode) have access.
+# Installs everything to /usr/local/bin so all users (appx, appx-agent) have access.
 #
 # Tools installed:
 #   - Go         (version pinned to go.mod — build tool)
 #   - Task        (taskfile.dev build runner — build tool)
 #   - Node.js 24  (via nvm, pinned to major version — runtime + agents)
-#   - OpenCode    (AI agent backend, version pinned to deploy/opencode-version)
+#   - Pi          (AI coding agent CLI/SDK, version pinned to deploy/pi-version)
+#   - agent-server (Pi SDK HTTP/SSE bridge, installed from sibling repo when present)
 #   - Claude Code (Claude CLI for terminal use — self-update: npm update -g @anthropic-ai/claude-code)
 #   - uv          (Python version/package manager — self-update: uv self update)
 #
@@ -116,27 +117,51 @@ fi
 # Follow the /usr/local/bin/node symlink back to the nvm versioned directory.
 NODE_BIN_DIR="$(dirname "$(readlink -f /usr/local/bin/node)")"
 
+# Remove the old agent backend package/shims if an earlier install left them behind.
+npm uninstall -g opencode-ai >/dev/null 2>&1 || true
+rm -f /usr/local/bin/opencode "$NODE_BIN_DIR/opencode"
+
 # ---------------------------------------------------------------------------
-# OpenCode (installed via npm, pinned to deploy/opencode-version)
+# Pi coding agent (installed via npm, pinned to deploy/pi-version)
 # ---------------------------------------------------------------------------
 
-OPENCODE_VERSION=""
-if [ -f "$SCRIPT_DIR/opencode-version" ]; then
-  OPENCODE_VERSION=$(cat "$SCRIPT_DIR/opencode-version" | tr -d '[:space:]')
+PI_VERSION=""
+if [ -f "$SCRIPT_DIR/pi-version" ]; then
+  PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
 fi
 
-# Strip leading 'v' for npm version syntax.
-OPENCODE_NPM_VERSION=$(echo "$OPENCODE_VERSION" | sed 's/^v//')
+CURRENT_PI=$(/usr/local/bin/pi --version 2>&1 || echo "")
 
-CURRENT=$(/usr/local/bin/opencode --version 2>/dev/null || echo "")
-
-if [ -n "$OPENCODE_NPM_VERSION" ] && [ "$CURRENT" = "$OPENCODE_NPM_VERSION" ]; then
-  echo "opencode already at $OPENCODE_NPM_VERSION"
+if [ -n "$PI_VERSION" ] && [ "$CURRENT_PI" = "$PI_VERSION" ]; then
+  echo "pi already at $PI_VERSION"
 else
-  echo "installing opencode${OPENCODE_NPM_VERSION:+ $OPENCODE_NPM_VERSION} via npm..."
-  npm install -g "opencode-ai@${OPENCODE_NPM_VERSION:-latest}"
-  ln -sf "$NODE_BIN_DIR/opencode" /usr/local/bin/opencode
-  echo "opencode installed: $(/usr/local/bin/opencode --version 2>/dev/null)"
+  echo "installing pi${PI_VERSION:+ $PI_VERSION} via npm..."
+  npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION:-latest}"
+  ln -sf "$NODE_BIN_DIR/pi" /usr/local/bin/pi
+  echo "pi installed: $(/usr/local/bin/pi --version 2>&1)"
+fi
+
+# ---------------------------------------------------------------------------
+# Appx agent-server (installed from sibling checkout when present)
+# ---------------------------------------------------------------------------
+
+AGENT_SERVER_DIR="${AGENT_SERVER_DIR:-}"
+if [ -z "$AGENT_SERVER_DIR" ] && [ -d "$REPO_DIR/../agent-server" ]; then
+  AGENT_SERVER_DIR="$(cd "$REPO_DIR/../agent-server" && pwd)"
+fi
+
+if [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/package.json" ]; then
+  echo "installing agent-server from $AGENT_SERVER_DIR..."
+  (
+    cd "$AGENT_SERVER_DIR"
+    npm ci
+    npm run build
+    npm install -g .
+  )
+  ln -sf "$NODE_BIN_DIR/agent-server" /usr/local/bin/agent-server
+  echo "agent-server installed: /usr/local/bin/agent-server"
+else
+  echo "agent-server repo not found; clone appx-org/agent-server next to appx or set AGENT_SERVER_DIR"
 fi
 
 # ---------------------------------------------------------------------------
@@ -164,7 +189,7 @@ else
   # Installer puts it in ~/.local/bin/ — copy to system path.
   for candidate in \
       /root/.local/bin/uv \
-      /home/opencode/.local/bin/uv; do
+      /home/appx-agent/.local/bin/uv; do
     if [ -x "$candidate" ]; then
       install -m 755 "$candidate" /usr/local/bin/uv
       echo "copied uv → /usr/local/bin/uv"
@@ -184,5 +209,6 @@ echo "  task:     $(task --version 2>/dev/null || echo 'not found')"
 echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"
-echo "  opencode: $(/usr/local/bin/opencode --version 2>/dev/null || echo 'not found')"
+echo "  pi:       $(/usr/local/bin/pi --version 2>&1 || echo 'not found')"
+echo "  agent-server: $(test -x /usr/local/bin/agent-server && echo installed || echo 'not found')"
 echo "  claude:   $(claude --version 2>/dev/null || echo 'not found')"
