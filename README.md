@@ -13,7 +13,7 @@ Browser
   └── HTTPS (single port)
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
-        ├── /api/projects/:id/agent/* → Pi agent-server project session proxy
+        ├── /api/pi/*       → agent-server /v1 mirror (agent-chat-ui SDK; project-scoped sessions + models)
         ├── /api/agent/*    → Pi agent-server shared auth/model proxy
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
@@ -21,9 +21,9 @@ Browser
 Appx itself is a single Go binary. The React frontend is compiled and embedded
 at build time. State lives in a SQLite database on disk.
 
-Pi is installed as the default agent runtime. In Pi mode, systemd runs
-`agent-server` on `localhost:4001` with `AGENT_SERVER_MODE=multi`, so Appx can
-share credentials while keeping sessions scoped to one project.
+Pi is installed as the default agent runtime. systemd runs `agent-server` on
+`localhost:4001`; agent-server owns project identity, directories, and sessions
+while sharing one set of Pi credentials, and Appx proxies session traffic to it.
 
 **Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
 
@@ -155,12 +155,42 @@ journalctl -u agent-server -f    # Pi agent-server logs
 
 ## Local development
 
-Run the sibling `agent-server` in multi-project mode before starting appx:
+### Temporary hack: link the `agent-chat` SDK locally
+
+The Agent tab UI is provided by the `@appx-org/agent-chat-ui` package. Until that
+package is published to GitHub Packages, `web/package.json` links it from a
+**sibling checkout** via a `file:` dependency (`file:../../agent-chat`), so the
+`agent-chat` repo must be cloned next to `appx` (both under the same parent):
+
+```text
+<parent>/
+├── appx/         ← this repo
+└── agent-chat/   ← github.com/appx-org/agent-chat
+```
+
+```bash
+# one-time, beside your appx checkout
+git clone https://github.com/appx-org/agent-chat.git ../agent-chat
+# the package ships TypeScript source consumed directly by appx's Vite build,
+# so its own deps must be installed once for the symlinked import to resolve
+cd ../agent-chat && npm install && cd -
+```
+
+`task web` / `task build` then follow the symlink and compile the SDK source as
+part of the frontend bundle. Vite dedupes React (see `web/vite.config.ts`) so
+the symlink can't pull a second React copy. When the package is published this
+`file:` spec swaps back to a semver range and the clone step goes away.
+
+### Run agent-server, then appx
+
+Run the sibling `agent-server` before starting appx. It needs `WORKSPACE_DIR`
+pointed at the **same** directory appx uses for projects (co-located dev), since
+agent-server owns the project directories and appx's subdomain proxy/terminal
+read them from that shared path:
 
 ```bash
 cd ../agent-server
-PROJECT_DIR=/path/to/appx-data/projects \
-AGENT_SERVER_MODE=multi \
+WORKSPACE_DIR=/path/to/appx-data/projects \
 AGENT_SERVER_PORT=4001 \
 npm run dev
 ```
@@ -186,24 +216,26 @@ All state lives in the data directory (configured during bootstrap, default `/va
 | SQLite DB, TLS certs, secrets | `{data}/.appx-internals/` | appx only |
 | Project directories           | `{data}/projects/`        | shared    |
 
-Each new project is scaffolded with a project-local Pi harness under
-`{data}/projects/<name>/.pi/`: an Appx-specific prompt, first-party guardrail
-extension, egress skill helper, and `settings.json` for reviewed/pinned Pi
-packages. Third-party Pi packages are not installed by default because they run
-inside the agent process.
+Each new project's directory is created and owned by `agent-server` (under its
+`WORKSPACE_DIR`, which is the shared `{data}/projects/` path in a co-located
+deployment). The project's Pi harness (`{data}/projects/<name>/.pi/`) is owned by
+agent-server and currently starts empty — appx no longer scaffolds a prompt,
+guardrail extension, or egress skill into it (see
+`.superpowers/specs/2026-06-09-project-ownership-and-agent-chat-integration-adr.md`).
+Reintroducing harness defaults/templates is tracked as future work.
 
 Pi credentials are configured from Settings. Built-in providers can use stored
 API keys or Pi subscription auth where the provider supports it, and custom
 providers such as LiteLLM are written to the agent service user's
 `models.json` without exposing secret values back to the browser.
 
-The Agent tab consumes Appx's project-scoped `/api/projects/{id}/agent/*`
-proxy, not provider-specific OpenAI or Anthropic streams. `agent-server` turns
-all supported Pi providers into the same session HTTP/SSE contract, so frontend
-streaming code should handle Pi `message_update` events by `contentIndex` for
-text and tool-call blocks. Pi extension UI requests, including Appx guardrail
-approvals for risky commands, are delivered over the same session stream and
-answered through the project-scoped agent proxy.
+The Agent tab is the `@appx-org/agent-chat-ui` SDK talking to Appx's same-origin
+`/api/pi/*` mirror, which proxies the `agent-server` `/v1` session contract
+(keeping the bearer token server-side). `agent-server` turns all supported Pi
+providers into the same session HTTP/SSE contract, so the SDK handles Pi
+`message_update` events by `contentIndex` for text and tool-call blocks. Pi
+extension UI requests, including Appx guardrail approvals for risky commands, are
+delivered over the same session stream and answered through the mirror.
 
 To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
 
