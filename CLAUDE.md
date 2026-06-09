@@ -16,11 +16,11 @@ task clean          # Remove build artifacts
 
 ## Architecture
 
-Single Go binary serves everything on one port (HTTPS or HTTP in dev mode). Pi runs behind the sibling `agent-server` service on `localhost:4001`. agent-server owns project identity, the on-disk project directory (including each project's `.pi/` harness), session transcripts, models, and credentials; appx is a **control plane + authorizing gateway** that owns auth, TLS, port/subdomain assignment, egress policy, and a per-project SQLite record, and proxies agent traffic to agent-server. See `.superpowers/specs/2026-06-09-project-ownership-and-agent-chat-integration-adr.md`.
+Single Go binary serves everything on one port (HTTPS or HTTP in dev mode). Pi runs behind the sibling `agent-server` service on `localhost:4001`. agent-server owns project identity, the on-disk project directory (including each project's `.pi/` harness), session transcripts, models, and credentials; appx is a **control plane + authorizing gateway** that owns auth, TLS, port/subdomain assignment, egress policy, and a per-project SQLite record, and proxies agent traffic to agent-server. See `.superpowers/specs/2026-06-09-project-ownership-and-agent-client-integration-adr.md`.
 
 - `localhost:<port>`: appx dashboard, embedded React SPA, and REST API.
 - `/api/*`: public `POST /api/login`, protected everything else.
-- `/api/pi/*`: same-origin 1:1 mirror of the agent-server `/v1` contract, consumed by the `@appx-org/agent-chat-ui` SDK. Authorizes project-scoped session traffic against the caller's registered projects (by slug) and never exposes project-lifecycle routes.
+- `/api/pi/*`: same-origin 1:1 mirror of the agent-server `/v1` contract, consumed by the `@appx-org/agent-client` SDK. Authorizes project-scoped session traffic against the caller's registered projects (by slug) and never exposes project-lifecycle routes.
 - `/api/projects/:id/agent/*`: legacy project-scoped Pi session proxy (no remaining frontend consumer; retained pending cleanup).
 - `/api/agent/*`: shared Pi provider auth, subscription login, model, and custom provider proxy.
 - `<project-name>.<base-domain>`: reverse proxy to agent-built apps on assigned ports.
@@ -59,7 +59,7 @@ internal/
     selfsigned.go              # Self-signed certificate generation
 web/src/
   api/client.ts                # Typed Appx API client
-  pages/Project.tsx            # Agent (via @appx-org/agent-chat-ui) and terminal tabs
+  pages/Project.tsx            # Agent (via @appx-org/agent-client) and terminal tabs
   components/Terminal.tsx      # xterm.js wrapper for local PTY shell
   pages/Dashboard.tsx          # Project list
   pages/Project.tsx            # Agent and terminal tabs
@@ -96,7 +96,7 @@ deploy/
 - Every exported function and component should have a JSDoc comment.
 - Keep endpoint calls in `web/src/api/client.ts`.
 - Use the existing dark Appx design tokens from `web/src/index.css`; avoid one-off hardcoded colors unless a component already does so.
-- Agent chat UI is provided by the `@appx-org/agent-chat-ui` package (linked via a `file:` dependency to the sibling `agent-chat` repo and consumed as TypeScript source). It talks to the `/api/pi` mirror; do not reintroduce a hand-written session store/reducer. Re-theme via the `--ac-*` token bridge in `web/src/index.css`.
+- Agent chat UI is provided by the `@appx-org/agent-client` package (linked via a `file:` dependency to the sibling `agent-client` repo and consumed as TypeScript source). It talks to the `/api/pi` mirror; do not reintroduce a hand-written session store/reducer. Re-theme via the `--ac-*` token bridge in `web/src/index.css`.
 - On 401, redirect to `/login`.
 
 ### Build
