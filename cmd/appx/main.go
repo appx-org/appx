@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"strconv"
 
+	"github.com/neuromaxer/appx/internal/agentserver"
 	"github.com/neuromaxer/appx/internal/auth"
 	"github.com/neuromaxer/appx/internal/db"
 	"github.com/neuromaxer/appx/internal/egress"
@@ -159,6 +161,14 @@ func main() {
 	agentServerURL := envOr("APPX_AGENT_SERVER_URL", "http://127.0.0.1:4001")
 	agentServerToken := os.Getenv("APPX_AGENT_SERVER_TOKEN")
 	log.Printf("agent backend: pi (%s)", agentServerURL)
+
+	// agent-server owns project runtimes; appx registers/removes projects through it.
+	pm.Agent = agentserver.NewClient(agentServerURL, agentServerToken)
+	// Best-effort: re-register known projects so existing projects work and an
+	// agent-server restart is transparent. Idempotent on the agent-server side.
+	if err := pm.ReconcileAgentProjects(context.Background()); err != nil {
+		log.Printf("warning: agent-server project reconcile incomplete: %v", err)
+	}
 
 	webFS, err := fs.Sub(webEmbed, "web/dist")
 	if err != nil {

@@ -1,13 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { AgentChat, AgentChatProvider, createAgentClient } from '@appx-org/agent-chat-ui';
 import {
   getProject,
   getServerConfig,
   logout,
   type Project as ProjectType,
 } from '../api/client';
-import PiAgentPane from '../components/pi-agent/PiAgentPane';
 import Terminal from '../components/Terminal';
+
+/**
+ * Stable theming overrides for the embedded agent chat. Defined at module scope
+ * so the object identity never changes across renders — passing an inline
+ * literal would recreate the provider's client/store (and drop the live
+ * session) on every re-render.
+ */
+const CHAT_LABELS = { agentName: 'PI AGENT' };
 
 /** Project is the full-page project view with tabbed Agent/Terminal interface.
  *  The Agent tab uses Pi. The Terminal tab is a local PTY rooted in the
@@ -21,6 +29,22 @@ export default function Project() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'agent' | 'terminal'>('agent');
   const [baseDomain, setBaseDomain] = useState('localhost');
+
+  // One stable client for the whole project view. The agent-chat SDK talks to
+  // the same-origin `/api/pi` mirror, which proxies the agent-server `/v1`
+  // contract (keeping the bearer token server-side). On 401 we redirect to the
+  // login page, matching the rest of the app.
+  const agentClient = useMemo(
+    () =>
+      createAgentClient({
+        baseUrl: '/api/pi',
+        pathPrefix: '/v1',
+        onUnauthorized: () => {
+          window.location.href = '/login';
+        },
+      }),
+    [],
+  );
 
   const fetchProject = useCallback(async () => {
     if (!id) return;
@@ -110,7 +134,11 @@ export default function Project() {
 
       <div style={styles.main}>
         {activeTab === 'agent' ? (
-          <PiAgentPane projectId={project.id} />
+          // agent-server addresses projects by their slug id, which equals the
+          // appx project *name* (appx names already satisfy the slug grammar).
+          <AgentChatProvider client={agentClient} labels={CHAT_LABELS}>
+            <AgentChat projectId={project.name} />
+          </AgentChatProvider>
         ) : (
           <Terminal cwd={projectDir} />
         )}

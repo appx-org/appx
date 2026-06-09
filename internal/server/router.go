@@ -80,6 +80,20 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	mux.Handle("PUT /api/shell/{id}", a.Middleware(limitBody(requireJSON(http.HandlerFunc(handleShellResize(lm))))))
 	mux.Handle("GET /api/shell/{id}/connect", a.Middleware(http.HandlerFunc(handleShellConnect(lm))))
 
+	// agent-chat SDK gateway: same-origin 1:1 mirror of the agent-server /v1
+	// contract. Mounted on the top-level mux (auth + body limit) rather than the
+	// requireJSON-wrapped api mux, because the SDK issues legitimate *bodyless*
+	// POSTs (create session, abort) that requireJSON would reject with 415. The
+	// route is still CSRF-safe: state-changing requests carry the SameSite=Lax
+	// session cookie (not sent on cross-site POST) and auth runs first, so a
+	// forged cross-origin request is rejected with 401 before reaching the proxy.
+	// More-specific patterns win over the "/api/" mux below.
+	agentMirror := agentServerMirrorHandler(pm, agentServerURL, rcfg.AgentServerToken)
+	mux.Handle("GET /api/pi/{piPath...}", a.Middleware(agentMirror))
+	mux.Handle("POST /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
+	mux.Handle("PATCH /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
+	mux.Handle("DELETE /api/pi/{piPath...}", a.Middleware(agentMirror))
+
 	// React SPA fallback
 	fileServer := http.FileServerFS(webFS)
 	mux.Handle("/", spaHandler(fileServer, webFS))
