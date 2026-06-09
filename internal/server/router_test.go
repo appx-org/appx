@@ -857,12 +857,12 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"path":        r.URL.Path,
-			"query":       r.URL.RawQuery,
-			"method":      r.Method,
-			"projectId":   r.Header.Get(agentProjectIDHeader),
-			"projectName": r.Header.Get(agentProjectNameHeader),
-			"projectDir":  r.Header.Get(agentProjectDirHeader),
+			"path":       r.URL.Path,
+			"query":      r.URL.RawQuery,
+			"method":     r.Method,
+			// agent-server resolves the project from its own registry; appx must
+			// not leak any internal project headers to it.
+			"projectId":  r.Header.Get(agentProjectIDHeader),
 		})
 	}))
 	defer backend.Close()
@@ -880,20 +880,16 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["path"] != "/v1/projects/p1/sessions" {
-		t.Errorf("expected path /v1/projects/p1/sessions after prefix strip, got %q", resp["path"])
+	// The proxy addresses agent-server by the project *name* (its slug id),
+	// not appx's UUID. insertProject names project p1 "proj-p1".
+	if resp["path"] != "/v1/projects/proj-p1/sessions" {
+		t.Errorf("expected path /v1/projects/proj-p1/sessions after prefix rewrite, got %q", resp["path"])
 	}
 	if resp["query"] != "limit=10" {
 		t.Errorf("expected query string preserved, got %q", resp["query"])
 	}
-	if resp["projectId"] != "p1" {
-		t.Errorf("expected trusted project id header p1, got %q", resp["projectId"])
-	}
-	if resp["projectName"] != "proj-p1" {
-		t.Errorf("expected trusted project name header proj-p1, got %q", resp["projectName"])
-	}
-	if !strings.Contains(resp["projectDir"], "proj-p1") {
-		t.Errorf("expected trusted project dir to include proj-p1, got %q", resp["projectDir"])
+	if resp["projectId"] != "" {
+		t.Errorf("expected internal project headers stripped, got %q", resp["projectId"])
 	}
 }
 
@@ -1655,5 +1651,190 @@ func TestChangePassword_InvalidatesOtherSessions(t *testing.T) {
 	// The old session should be invalid.
 	if store.ValidSession(oldToken) {
 		t.Error("old session should have been invalidated after password change")
+	}
+}
+
+// --- agent-server /v1 mirror (agent-chat SDK gateway) ---------------------
+
+func TestAgentMirror_RequiresAuth(t *testing.T) {
+	handler, _, db := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+	insertProject(t, db, "p1")
+
+	req := httptest.NewRequest("GET", "/api/pi/v1/projects/proj-p1/sessions", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestAgentMirror_ForwardsProjectSessionTraffic(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":          r.URL.Path,
+			"query":         r.URL.RawQuery,
+			"cookie":        r.Header.Get("Cookie"),
+			"authorization": r.Header.Get("Authorization"),
+		})
+	}))
+	defer backend.Close()
+
+	handler, store, db := setupTestWithAgentServerBackend(t, backend.URL, "secret-token")
+	insertProject(t, db, "p1") // name == "proj-p1"
+
+	req := authedRequest(t, store, "GET", "/api/pi/v1/projects/proj-p1/sessions?limit=10", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	// The /v1 contract path is forwarded verbatim (1:1 mirror), not rewritten.
+	if resp["path"] != "/v1/projects/proj-p1/sessions" {
+		t.Errorf("expected verbatim /v1 path, got %q", resp["path"])
+	}
+	if resp["query"] != "limit=10" {
+		t.Errorf("expected query preserved, got %q", resp["query"])
+	}
+	if resp["cookie"] != "" {
+		t.Errorf("expected appx cookie stripped, got %q", resp["cookie"])
+	}
+	if resp["authorization"] != "Bearer secret-token" {
+		t.Errorf("expected bearer token forwarded, got %q", resp["authorization"])
+	}
+}
+
+func TestAgentMirror_AllowsGlobalModelCatalogue(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"path": r.URL.Path})
+	}))
+	defer backend.Close()
+
+	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "")
+
+	req := authedRequest(t, store, "GET", "/api/pi/v1/sessions/models", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "/v1/sessions/models" {
+		t.Errorf("expected /v1/sessions/models, got %q", resp["path"])
+	}
+}
+
+func TestAgentMirror_UnknownProjectForbidden(t *testing.T) {
+	handler, store, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+
+	req := authedRequest(t, store, "GET", "/api/pi/v1/projects/ghost/sessions", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for unregistered project, got %d", w.Code)
+	}
+}
+
+func TestAgentMirror_ProjectLifecycleRoutesForbidden(t *testing.T) {
+	handler, store, db := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+	insertProject(t, db, "p1")
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/api/pi/v1/projects"},                  // list all projects
+		{"POST", "/api/pi/v1/projects"},                 // create project
+		{"GET", "/api/pi/v1/projects/proj-p1"},          // bare project metadata
+		{"DELETE", "/api/pi/v1/projects/proj-p1"},       // delete project
+		{"GET", "/api/pi/v1/projects/proj-p1/settings"}, // non-session subresource
+	}
+	for _, tc := range cases {
+		req := authedRequest(t, store, tc.method, tc.path, "")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s %s: expected 403, got %d", tc.method, tc.path, w.Code)
+		}
+	}
+}
+
+func TestAgentMirror_ClearsWriteDeadline(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	handler, store, db := setupTestWithAgentServerBackend(t, backend.URL, "")
+	insertProject(t, db, "p1")
+
+	req := authedRequest(t, store, "GET", "/api/pi/v1/projects/proj-p1/sessions/s1/events", "")
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	handler.ServeHTTP(rec, req)
+
+	if !rec.writeDeadlineCleared {
+		t.Error("expected write deadline cleared for SSE mirror requests")
+	}
+}
+
+// TestAgentMirror_AllowsBodylessPost reproduces the agent-chat SDK's
+// createSession/abort calls: a POST with no body and no Content-Type. These
+// must be forwarded, not rejected with 415 by requireJSON (regression: the
+// mirror is mounted outside the requireJSON-wrapped api mux for this reason).
+func TestAgentMirror_AllowsBodylessPost(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"path": r.URL.Path, "method": r.Method})
+	}))
+	defer backend.Close()
+
+	handler, store, db := setupTestWithAgentServerBackend(t, backend.URL, "")
+	insertProject(t, db, "p1") // name == "proj-p1"
+
+	// Authenticated, but deliberately NO Content-Type header and NO body.
+	token, err := store.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/pi/v1/projects/proj-p1/sessions", nil)
+	req.AddCookie(&http.Cookie{Name: "appx_session", Value: token})
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code == http.StatusUnsupportedMediaType {
+		t.Fatal("bodyless POST was rejected with 415; mirror must bypass requireJSON")
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["path"] != "/v1/projects/proj-p1/sessions" || resp["method"] != "POST" {
+		t.Errorf("unexpected forwarded request: %v", resp)
+	}
+}
+
+// TestAgentMirror_BodylessPostRequiresAuth confirms dropping requireJSON did not
+// drop authentication: an unauthenticated bodyless POST is still rejected.
+func TestAgentMirror_BodylessPostRequiresAuth(t *testing.T) {
+	handler, _, db := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+	insertProject(t, db, "p1")
+
+	req := httptest.NewRequest("POST", "/api/pi/v1/projects/proj-p1/sessions", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated request, got %d", w.Code)
 	}
 }

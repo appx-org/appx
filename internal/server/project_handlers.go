@@ -45,7 +45,7 @@ func handleCreateProject(pm *project.Manager) http.HandlerFunc {
 			return
 		}
 
-		proj, err := pm.Create(req.Name)
+		proj, err := pm.Create(r.Context(), req.Name)
 		if err != nil {
 			if errors.Is(err, project.ErrInvalidName) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -96,7 +96,7 @@ func handleGetProject(pm *project.Manager, hc *project.HealthChecker) http.Handl
 func handleDeleteProject(pm *project.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if err := pm.Delete(id); err != nil {
+		if err := pm.Delete(r.Context(), id); err != nil {
 			if errors.Is(err, project.ErrNotFound) {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
