@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { AgentChat, AgentChatProvider, createAgentClient } from '@appx-org/agent-chat-ui';
+import { AgentChat, AgentChatProvider, createAgentClient } from '@appx-org/agent-client';
 import {
   getProject,
   getServerConfig,
@@ -30,7 +30,7 @@ export default function Project() {
   const [activeTab, setActiveTab] = useState<'agent' | 'terminal'>('agent');
   const [baseDomain, setBaseDomain] = useState('localhost');
 
-  // One stable client for the whole project view. The agent-chat SDK talks to
+  // One stable client for the whole project view. The agent-client SDK talks to
   // the same-origin `/api/pi` mirror, which proxies the agent-server `/v1`
   // contract (keeping the bearer token server-side). On 401 we redirect to the
   // login page, matching the rest of the app.

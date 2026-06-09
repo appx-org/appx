@@ -13,7 +13,7 @@ Browser
   └── HTTPS (single port)
         ├── /              React SPA (embedded in binary)
         ├── /api/*         REST API (auth, projects, settings)
-        ├── /api/pi/*       → agent-server /v1 mirror (agent-chat-ui SDK; project-scoped sessions + models)
+        ├── /api/pi/*       → agent-server /v1 mirror (agent-client SDK; project-scoped sessions + models)
         ├── /api/agent/*    → Pi agent-server shared auth/model proxy
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
@@ -155,25 +155,25 @@ journalctl -u agent-server -f    # Pi agent-server logs
 
 ## Local development
 
-### Temporary hack: link the `agent-chat` SDK locally
+### Temporary hack: link the `agent-client` SDK locally
 
-The Agent tab UI is provided by the `@appx-org/agent-chat-ui` package. Until that
+The Agent tab UI is provided by the `@appx-org/agent-client` package. Until that
 package is published to GitHub Packages, `web/package.json` links it from a
-**sibling checkout** via a `file:` dependency (`file:../../agent-chat`), so the
-`agent-chat` repo must be cloned next to `appx` (both under the same parent):
+**sibling checkout** via a `file:` dependency (`file:../../agent-client`), so the
+`agent-client` repo must be cloned next to `appx` (both under the same parent):
 
 ```text
 <parent>/
 ├── appx/         ← this repo
-└── agent-chat/   ← github.com/appx-org/agent-chat
+└── agent-client/   ← github.com/appx-org/agent-client
 ```
 
 ```bash
 # one-time, beside your appx checkout
-git clone https://github.com/appx-org/agent-chat.git ../agent-chat
+git clone https://github.com/appx-org/agent-client.git ../agent-client
 # the package ships TypeScript source consumed directly by appx's Vite build,
 # so its own deps must be installed once for the symlinked import to resolve
-cd ../agent-chat && npm install && cd -
+cd ../agent-client && npm install && cd -
 ```
 
 `task web` / `task build` then follow the symlink and compile the SDK source as
@@ -221,7 +221,7 @@ Each new project's directory is created and owned by `agent-server` (under its
 deployment). The project's Pi harness (`{data}/projects/<name>/.pi/`) is owned by
 agent-server and currently starts empty — appx no longer scaffolds a prompt,
 guardrail extension, or egress skill into it (see
-`.superpowers/specs/2026-06-09-project-ownership-and-agent-chat-integration-adr.md`).
+`.superpowers/specs/2026-06-09-project-ownership-and-agent-client-integration-adr.md`).
 Reintroducing harness defaults/templates is tracked as future work.
 
 Pi credentials are configured from Settings. Built-in providers can use stored
@@ -229,7 +229,7 @@ API keys or Pi subscription auth where the provider supports it, and custom
 providers such as LiteLLM are written to the agent service user's
 `models.json` without exposing secret values back to the browser.
 
-The Agent tab is the `@appx-org/agent-chat-ui` SDK talking to Appx's same-origin
+The Agent tab is the `@appx-org/agent-client` SDK talking to Appx's same-origin
 `/api/pi/*` mirror, which proxies the `agent-server` `/v1` session contract
 (keeping the bearer token server-side). `agent-server` turns all supported Pi
 providers into the same session HTTP/SSE contract, so the SDK handles Pi
