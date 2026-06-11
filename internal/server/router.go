@@ -62,11 +62,6 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	if agentServerURL == "" {
 		agentServerURL = "http://127.0.0.1:4001"
 	}
-	agentGlobalProxy := agentServerGlobalProxyHandler(agentServerURL, rcfg.AgentServerToken)
-	api.Handle("GET /api/agent/{agentPath...}", agentGlobalProxy)
-	api.Handle("POST /api/agent/{agentPath...}", agentGlobalProxy)
-	api.Handle("PUT /api/agent/{agentPath...}", agentGlobalProxy)
-	api.Handle("DELETE /api/agent/{agentPath...}", agentGlobalProxy)
 	agentProxy := agentServerProxyHandler(pm, agentServerURL, rcfg.AgentServerToken)
 	api.Handle("GET /api/projects/{id}/agent/{agentPath...}", agentProxy)
 	api.Handle("POST /api/projects/{id}/agent/{agentPath...}", agentProxy)
@@ -87,10 +82,13 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	// route is still CSRF-safe: state-changing requests carry the SameSite=Lax
 	// session cookie (not sent on cross-site POST) and auth runs first, so a
 	// forged cross-origin request is rejected with 401 before reaching the proxy.
-	// More-specific patterns win over the "/api/" mux below.
+	// This is the single same-origin surface the agent-client SDK uses for
+	// sessions, the model catalogue, and runtime credential management
+	// (/v1/auth, /v1/custom). More-specific patterns win over the "/api/" mux below.
 	agentMirror := agentServerMirrorHandler(pm, agentServerURL, rcfg.AgentServerToken)
 	mux.Handle("GET /api/pi/{piPath...}", a.Middleware(agentMirror))
 	mux.Handle("POST /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
+	mux.Handle("PUT /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
 	mux.Handle("PATCH /api/pi/{piPath...}", a.Middleware(limitBody(agentMirror)))
 	mux.Handle("DELETE /api/pi/{piPath...}", a.Middleware(agentMirror))
 

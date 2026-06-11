@@ -29,7 +29,7 @@ const (
 // slug id (== the appx project name). We resolve the project here and hand the
 // agent-server id to the Director via a short-lived internal header.
 func agentServerProxyHandler(pm *project.Manager, backendURL string, token string) http.Handler {
-	proxy := agentServerReverseProxy(backendURL, token, true)
+	proxy := agentServerReverseProxy(backendURL, token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.PathValue("id")
 		if projectID == "" {
@@ -50,18 +50,7 @@ func agentServerProxyHandler(pm *project.Manager, backendURL string, token strin
 	})
 }
 
-// agentServerGlobalProxyHandler exposes global runtime resources such as auth
-// status. Unlike project session routes, these are tied to the configured
-// agent-server process and do not require a project id.
-func agentServerGlobalProxyHandler(backendURL string, token string) http.Handler {
-	proxy := agentServerReverseProxy(backendURL, token, false)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NewResponseController(w).SetWriteDeadline(time.Time{})
-		proxy.ServeHTTP(w, r)
-	})
-}
-
-func agentServerReverseProxy(backendURL string, token string, projectScoped bool) http.Handler {
+func agentServerReverseProxy(backendURL string, token string) http.Handler {
 	target, err := url.Parse(backendURL)
 	if err != nil || target.Scheme == "" || target.Host == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -72,13 +61,10 @@ func agentServerReverseProxy(backendURL string, token string, projectScoped bool
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			agentPath := strings.TrimPrefix(req.PathValue("agentPath"), "/")
-			proxyPrefix := "/v1"
-			if projectScoped {
-				// Use the resolved agent-server id (== project name), not appx's
-				// UUID path value, then strip the internal header.
-				agentProjectID := req.Header.Get(agentProjectIDHeader)
-				proxyPrefix = "/v1/projects/" + url.PathEscape(agentProjectID)
-			}
+			// Use the resolved agent-server id (== project name), not appx's
+			// UUID path value, then strip the internal header.
+			agentProjectID := req.Header.Get(agentProjectIDHeader)
+			proxyPrefix := "/v1/projects/" + url.PathEscape(agentProjectID)
 			req.URL.Path = cleanAgentServerPath(proxyPrefix, agentPath)
 			req.URL.RawPath = ""
 			req.URL.Scheme = target.Scheme
@@ -122,6 +108,13 @@ func cleanAgentServerPath(prefix string, agentPath string) string {
 // contract:
 //   - GET /v1/sessions/...             session-independent, read-only globals
 //                                      (e.g. the model catalogue); project-agnostic.
+//   - /v1/auth/...   /v1/custom/...     runtime-global credential + custom-provider
+//                                      management (provider API keys, subscription
+//                                      logins, models.json providers). These are not
+//                                      project-scoped: they configure the single
+//                                      agent-server process appx fronts. Exposed only
+//                                      to authenticated dashboard users (the SameSite
+//                                      cookie + auth middleware run before the proxy).
 //   - /v1/projects/{slug}/sessions...  session traffic, only when the
 //                                      authenticated user owns a project whose
 //                                      slug (== appx project name) is registered.
@@ -191,6 +184,12 @@ func mirrorAccessAllowed(pm *project.Manager, method string, mirrorPath string) 
 	case "sessions":
 		// Session-independent globals (e.g. /v1/sessions/models). Read-only.
 		return method == http.MethodGet
+	case "auth", "custom":
+		// Runtime-global credential + custom-provider management. Not
+		// project-scoped: these configure the single agent-server process appx
+		// fronts. Any authenticated dashboard user may manage them (the same
+		// access the now-removed /api/agent global proxy granted).
+		return true
 	case "projects":
 		// Only project-scoped *session* traffic is allowed, and only for a
 		// project registered with appx. Bare project lifecycle is never exposed.

@@ -893,107 +893,6 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 	}
 }
 
-func TestAgentServerGlobalProxy_Authed_ForwardsAuthRequest(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"path":          r.URL.Path,
-			"method":        r.Method,
-			"cookie":        r.Header.Get("Cookie"),
-			"authorization": r.Header.Get("Authorization"),
-		})
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "secret-token")
-
-	req := authedRequest(t, store, "GET", "/api/agent/auth/providers", "")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["path"] != "/v1/auth/providers" {
-		t.Errorf("expected path /v1/auth/providers after prefix strip, got %q", resp["path"])
-	}
-	if resp["cookie"] != "" {
-		t.Errorf("expected appx cookie to be stripped, got %q", resp["cookie"])
-	}
-	if resp["authorization"] != "Bearer secret-token" {
-		t.Errorf("expected bearer token forwarded, got %q", resp["authorization"])
-	}
-}
-
-func TestAgentServerGlobalProxy_Authed_ForwardsPostRequest(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"path":   r.URL.Path,
-			"method": r.Method,
-		})
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "")
-
-	req := authedRequest(t, store, "POST", "/api/agent/auth/providers/openai-codex/subscription/start", "{}")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["path"] != "/v1/auth/providers/openai-codex/subscription/start" {
-		t.Errorf("expected subscription path after prefix strip, got %q", resp["path"])
-	}
-	if resp["method"] != "POST" {
-		t.Errorf("expected POST forwarded, got %q", resp["method"])
-	}
-}
-
-func TestAgentServerProxy_KeepsCleanedPathUnderV1Prefix(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"path": r.URL.Path})
-	}))
-	defer backend.Close()
-
-	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "")
-
-	req := authedRequest(t, store, "GET", "/api/agent/%2e%2e/health", "")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["path"] != "/v1/health" {
-		t.Errorf("expected cleaned path to stay under /v1, got %q", resp["path"])
-	}
-}
-
-func TestAgentServerGlobalProxy_RequiresAuth(t *testing.T) {
-	handler, _, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
-
-	req := httptest.NewRequest("GET", "/api/agent/auth/providers", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", w.Code)
-	}
-}
-
 func TestAgentServerProxy_StripsCookieAndAddsBearer(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1732,6 +1631,72 @@ func TestAgentMirror_AllowsGlobalModelCatalogue(t *testing.T) {
 	}
 }
 
+// TestAgentMirror_AllowsCredentialRoutes confirms the mirror forwards the
+// runtime-global credential + custom-provider management routes (/v1/auth,
+// /v1/custom) for authenticated users. agent-client's AgentSettings panel uses
+// these through the same /api/pi gateway as session traffic.
+func TestAgentMirror_AllowsCredentialRoutes(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":          r.URL.Path,
+			"method":        r.Method,
+			"cookie":        r.Header.Get("Cookie"),
+			"authorization": r.Header.Get("Authorization"),
+		})
+	}))
+	defer backend.Close()
+
+	handler, store, _ := setupTestWithAgentServerBackend(t, backend.URL, "secret-token")
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/api/pi/v1/auth/providers"},
+		{"PUT", "/api/pi/v1/auth/providers/anthropic/api-key"},
+		{"DELETE", "/api/pi/v1/auth/providers/anthropic"},
+		{"POST", "/api/pi/v1/auth/providers/openai-codex/subscription/start"},
+		{"GET", "/api/pi/v1/custom/providers"},
+		{"PUT", "/api/pi/v1/custom/providers"},
+		{"DELETE", "/api/pi/v1/custom/providers/litellm"},
+	}
+	for _, tc := range cases {
+		req := authedRequest(t, store, tc.method, tc.path, "{}")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s %s: expected 200, got %d: %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+		var resp map[string]string
+		json.NewDecoder(w.Body).Decode(&resp)
+		// The /v1 contract path is forwarded verbatim (1:1 mirror).
+		wantPath := strings.TrimPrefix(tc.path, "/api/pi")
+		if resp["path"] != wantPath {
+			t.Errorf("%s %s: expected forwarded path %q, got %q", tc.method, tc.path, wantPath, resp["path"])
+		}
+		if resp["cookie"] != "" {
+			t.Errorf("%s %s: expected appx cookie stripped, got %q", tc.method, tc.path, resp["cookie"])
+		}
+		if resp["authorization"] != "Bearer secret-token" {
+			t.Errorf("%s %s: expected bearer token forwarded, got %q", tc.method, tc.path, resp["authorization"])
+		}
+	}
+}
+
+func TestAgentMirror_CredentialRoutesRequireAuth(t *testing.T) {
+	handler, _, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
+
+	req := httptest.NewRequest("GET", "/api/pi/v1/auth/providers", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated credential request, got %d", w.Code)
+	}
+}
+
 func TestAgentMirror_UnknownProjectForbidden(t *testing.T) {
 	handler, store, _ := setupTestWithAgentServerBackend(t, "http://127.0.0.1:4001", "")
 
@@ -1757,6 +1722,7 @@ func TestAgentMirror_ProjectLifecycleRoutesForbidden(t *testing.T) {
 		{"GET", "/api/pi/v1/projects/proj-p1"},          // bare project metadata
 		{"DELETE", "/api/pi/v1/projects/proj-p1"},       // delete project
 		{"GET", "/api/pi/v1/projects/proj-p1/settings"}, // non-session subresource
+		{"GET", "/api/pi/v1/healthz"},                   // runtime liveness (not a session/credential route)
 	}
 	for _, tc := range cases {
 		req := authedRequest(t, store, tc.method, tc.path, "")

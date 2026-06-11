@@ -30,6 +30,8 @@
  * so equal-specificity cascade order makes these win.
  */
 .agent-chat-root,
+.agent-client-root,
+.agent-settings,
 .agent-chat-chat-panel,
 .agent-chat-session-list {
   --ac-bg: var(--bg);
