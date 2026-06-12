@@ -92,6 +92,12 @@ else
 #   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
 #   CLOUDFLARE_API_TOKEN — Cloudflare API token for DNS-01 challenge (optional)
+#   APPX_AGENT_CONTAINER — "true" makes appx create/supervise the agent-server
+#                          OUTER container itself (Stage 3). Default host mode.
+#   APPX_AGENT_IMAGE — outer image tag (built locally) or registry ref/digest to
+#                      pull (container mode; default "builder-outer")
+#   APPX_AGENT_SECCOMP — absolute path to the tailored seccomp profile
+#                        (container mode; deploy installs /etc/appx/seccomp-builder.json)
 
 APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
@@ -99,6 +105,10 @@ APPX_PORT=$APPX_PORT
 APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 # APPX_DOMAIN=
 # CLOUDFLARE_API_TOKEN=
+# --- Container mode (Stage 3): uncomment to have appx manage the outer container ---
+# APPX_AGENT_CONTAINER=true
+# APPX_AGENT_IMAGE=builder-outer
+# APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json
 EOF
   chmod 600 "$ENV_FILE"
   echo "wrote config → $ENV_FILE"
@@ -169,14 +179,27 @@ echo ""
 # ---------------------------------------------------------------------------
 
 STEP="restart-services"
+# Detect container mode from the env file (agent-server runs inside the
+# appx-managed container, so there is no host agent-server.service to start).
+APPX_AGENT_CONTAINER_VAL=$(grep '^APPX_AGENT_CONTAINER=' "$ENV_FILE" | cut -d= -f2- || true)
+case "$(echo "${APPX_AGENT_CONTAINER_VAL}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on) CONTAINER_MODE=true ;;
+  *) CONTAINER_MODE=false ;;
+esac
+
 echo "stopping services..."
 systemctl stop agent-server opencode appx 2>/dev/null || true
 sleep 2
 echo "starting services..."
-systemctl start agent-server appx
-echo "waiting for agent-server to be ready..."
-for i in $(seq 1 10); do
-  curl -sf http://127.0.0.1:4001/v1/healthz >/dev/null 2>&1 && break
+if [ "$CONTAINER_MODE" = "true" ]; then
+  # appx creates/supervises the outer container (which runs agent-server) at boot.
+  systemctl start appx
+else
+  systemctl start agent-server appx
+fi
+echo "waiting for agent-server to be ready (published on 127.0.0.1:4001)..."
+for i in $(seq 1 30); do
+  curl -sf http://127.0.0.1:4001/ >/dev/null 2>&1 && break
   sleep 2
 done
 echo "services started"

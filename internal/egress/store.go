@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +25,9 @@ var DefaultAllowlist = []string{
 	"sum.golang.org:443",
 	// Node / Python packages
 	"registry.npmjs.org:443",
+	// AWS Bedrock (model inference). Wildcard matches per-region runtime
+	// endpoints, e.g. bedrock-runtime.us-east-1.amazonaws.com.
+	"bedrock-runtime.*.amazonaws.com:443",
 }
 
 const settingKey = "egress_allowlist"
@@ -141,12 +145,73 @@ func (s *Store) AddToAllowlist(host string, port int) error {
 	return s.SetAllowlist(current)
 }
 
-// IsAllowed checks whether host:port is in the allowlist. O(1) in-memory lookup.
+// IsAllowed checks whether host:port is in the allowlist. Exact entries are an
+// O(1) map lookup; entries containing a '*' are matched as DNS wildcards where
+// each '*' matches a single label (a run of non-dot characters), like a
+// wildcard TLS cert (e.g. "bedrock-runtime.*.amazonaws.com" matches
+// "bedrock-runtime.us-east-1.amazonaws.com" but not "...a.b.amazonaws.com").
 func (s *Store) IsAllowed(host string, port int) bool {
 	key := fmt.Sprintf("%s:%d", host, port)
+	portSuffix := fmt.Sprintf(":%d", port)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.allowlist[key]
+	if s.allowlist[key] {
+		return true
+	}
+	// Fall back to wildcard entries (same port).
+	for entry := range s.allowlist {
+		if !strings.Contains(entry, "*") || !strings.HasSuffix(entry, portSuffix) {
+			continue
+		}
+		pattern := strings.TrimSuffix(entry, portSuffix)
+		if wildcardHostMatch(pattern, host) {
+			return true
+		}
+	}
+	return false
+}
+
+// wildcardHostMatch reports whether host matches a DNS pattern where '*' within
+// a label matches any run of non-dot characters. Pattern and host must have the
+// same number of labels, so a wildcard can never span a dot (this keeps
+// "bedrock-runtime.*.amazonaws.com" from matching "x.amazonaws.com.evil.com").
+func wildcardHostMatch(pattern, host string) bool {
+	pp := strings.Split(pattern, ".")
+	hp := strings.Split(host, ".")
+	if len(pp) != len(hp) {
+		return false
+	}
+	for i := range pp {
+		if !labelGlob(pp[i], hp[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// labelGlob matches a single DNS label against a pattern label in which '*'
+// matches zero or more characters (no dots — labels never contain dots).
+func labelGlob(pattern, label string) bool {
+	if !strings.Contains(pattern, "*") {
+		return pattern == label
+	}
+	parts := strings.Split(pattern, "*")
+	// Anchor the first and last parts; everything between must appear in order.
+	if !strings.HasPrefix(label, parts[0]) {
+		return false
+	}
+	if !strings.HasSuffix(label, parts[len(parts)-1]) {
+		return false
+	}
+	rest := label[len(parts[0]):]
+	for _, part := range parts[1 : len(parts)-1] {
+		idx := strings.Index(rest, part)
+		if idx < 0 {
+			return false
+		}
+		rest = rest[idx+len(part):]
+	}
+	return true
 }
 
 // PruneLog deletes egress log entries older than maxAge. Called periodically

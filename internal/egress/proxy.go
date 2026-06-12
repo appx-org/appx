@@ -13,6 +13,11 @@ import (
 // ProxyAddr is the default listen address for the egress CONNECT proxy.
 const ProxyAddr = "127.0.0.1:9080"
 
+// ProxyPort is the egress CONNECT proxy's TCP port. Used to build a bind
+// address on a non-loopback host (container mode binds it on the bridge
+// gateway so the in-container agent can reach it via host.docker.internal).
+const ProxyPort = "9080"
+
 const tunnelTimeout = 30 * time.Minute
 const dialTimeout = 10 * time.Second
 

@@ -85,22 +85,23 @@ New `internal/containerruntime` package: small interface + docker-CLI implementa
 | 0 | Nested rootless podman spike (timeboxed) | agent-server |
 | 1 | Full user flow with agent-server **on host** | both |
 | 2 | agent-server inside the outer container, started manually | agent-server |
-| 3 | appx creates/supervises the outer container at startup | **appx** |
-| 4 | Hardening | both |
+| 3 | appx creates/supervises the outer container at startup | **appx** ✅ |
+| 4 | **Productionize**: appx as a systemd service in container mode (deploy scripts, secrets, docker access, soak) | **appx** |
+| 5 | Hardening | both |
 
 ---
 
 ## Stage 1 — Deployment handshake (appx side)
 
-- [ ] `internal/agentserver/client.go`: `EnsureProject(ctx, name string, dep Deployment) error` with `Deployment{Dev, Prod EnvTarget}` and `EnvTarget{Port int; URL string}`; marshal as the nested `deployment` object (omit empty)
-- [ ] `internal/project/store.go`: allocate a **DEV+PROD port pair** atomically; `Project` gains `DevPort` + `ProdPort` (or keep `AssignedPort` as prod, add `DevPort`); cap via `PublishedPortRangeEnd` (≈ 50 projects); `ErrNoPortAvailable` message updated
-- [ ] `internal/project/project.go`: `ValidateName` rejects names ending in `-dev` (reserved suffix, D2)
-- [ ] `internal/project/manager.go`:
+- [x] `internal/agentserver/client.go`: `EnsureProject(ctx, name string, dep Deployment) error` with `Deployment{Dev, Prod EnvTarget}` and `EnvTarget{Port int; URL string}`; marshal as the nested `deployment` object (omit empty)
+- [x] `internal/project/store.go`: allocate a **DEV+PROD port pair** atomically; `Project` gains `DevPort` + `ProdPort` (or keep `AssignedPort` as prod, add `DevPort`); cap via `PublishedPortRangeEnd` (≈ 50 projects); `ErrNoPortAvailable` message updated
+- [x] `internal/project/project.go`: `ValidateName` rejects names ending in `-dev` (reserved suffix, D2)
+- [x] `internal/project/manager.go`:
   - `AgentRegistrar` interface carries the dev+prod deployment payload
   - `Manager` gains URL construction for prod + dev (`<name>` / `<name>-dev`) — needs `HTTPMode`/external-port knowledge threaded from `main.go`, not guessed
   - `Create` and `ReconcileAgentProjects` pass `{dev:{devPort, devURL}, prod:{prodPort, prodURL}}`
-- [ ] `internal/server/router.go`: subdomain dispatcher selects DEV vs PROD port from the `-dev` label (D5); WebSocket upgrade passes through
-- [ ] Tests: fake-registrar payload (create + reconcile, dev+prod), URL construction (prod/dev × https/http modes), pair allocation + cap boundary, `ValidateName` rejects `-dev`, **router: `<name>-dev`→DevPort, `<name>`→ProdPort, and a WebSocket upgrade proxies through**
+- [x] `internal/server/router.go`: subdomain dispatcher selects DEV vs PROD port from the `-dev` label (D5); WebSocket upgrade passes through
+- [x] Tests: fake-registrar payload (create + reconcile, dev+prod), URL construction (prod/dev × https/http modes), pair allocation + cap boundary, `ValidateName` rejects `-dev`, **router: `<name>-dev`→DevPort, `<name>`→ProdPort, and a WebSocket upgrade proxies through**
 
 **Acceptance (cross-repo, manual):** `task local` + agent-server `npm run dev` (Docker Desktop/podman as the agent's `APP_CONTAINER_RUNTIME`) → create project in UI → prompt agent to build+deploy → DEV app at `http://<name>-dev.127.0.0.1.sslip.io:8080`, PROD at `http://<name>.127.0.0.1.sslip.io:8080` → refine → DEV updates → promote → PROD updates. UI shows running state via `AppRunning`.
 
@@ -112,7 +113,7 @@ Run the outer container manually (script lives in agent-server repo), point appx
 
 ### `internal/containerruntime`
 
-- [ ] Interface (sketch):
+- [x] Interface (sketch):
   ```go
   type Supervisor interface {
       // EnsureRunning creates the container if absent, starts it if stopped,
@@ -122,38 +123,222 @@ Run the outer container manually (script lives in agent-server repo), point appx
   }
   ```
   `ContainerSpec`: image, name, port publishes (API + app range), volumes (workspace + podman storage), env (`ANTHROPIC_API_KEY` etc. passthrough, `AGENT_SERVER_TOKEN`, `WORKSPACE_DIR=/workspace`, `APPX_TEMPLATE_DIR`, proxy vars), extra flags = the **proven Stage 0 set** transcribed verbatim from `run-outer.sh`: `--device /dev/net/tun`, `--security-opt seccomp=<tailored profile>`, `--security-opt apparmor=unconfined`, `--security-opt systempaths=unconfined`, plus `--memory`/`--cpus` and `--add-host=host.docker.internal:host-gateway`. **No `--privileged`, no `--cap-add SYS_ADMIN`, no `/dev/fuse`** (the spike's file-cap `newuidmap` + native overlay removed the need for those)
-- [ ] Docker CLI implementation: `docker inspect --format json` for state, `docker run -d` for create, `docker start` for stopped; readiness = poll agent-server `GET /` with timeout; structured errors (image missing vs daemon down vs unhealthy)
-- [ ] Fake implementation for unit tests
+- [x] Docker CLI implementation: `docker inspect --format json` for state, `docker run -d` for create, `docker start` for stopped; readiness = poll agent-server `GET /` with timeout; structured errors (image missing vs daemon down vs unhealthy)
+- [x] Fake implementation for unit tests
 
 ### Wiring (`cmd/appx/main.go`)
 
-- [ ] `APPX_AGENT_CONTAINER=true` → build spec from config (`APPX_AGENT_IMAGE`, ranges, data dirs), `EnsureRunning` **before** `ReconcileAgentProjects`; fail loudly with a remediation hint if docker is unavailable
-- [ ] `AGENT_SERVER_TOKEN` becomes **mandatory in container mode**: generate once, persist to `.appx-internals` (0600), pass to both the container env and the proxy clients. The API port is published (even if loopback-only); loopback is no longer a sufficient trust boundary on a multi-process host (OWASP A01/A07)
-- [ ] Mismatched config detection: if the existing container's spec (image tag, published range) differs from desired, log instructions (or `--recreate-agent-container` flag); **never silently recreate** — that kills running user apps
+- [x] `APPX_AGENT_CONTAINER=true` → build spec from config (`APPX_AGENT_IMAGE`, ranges, data dirs), `EnsureRunning` **before** `ReconcileAgentProjects`; fail loudly with a remediation hint if docker is unavailable
+- [x] `AGENT_SERVER_TOKEN` becomes **mandatory in container mode**: generate once, persist to `.appx-internals` (0600), pass to both the container env and the proxy clients. The API port is published (even if loopback-only); loopback is no longer a sufficient trust boundary on a multi-process host (OWASP A01/A07)
+- [x] Mismatched config detection: if the existing container's spec (image tag, published range) differs from desired, log instructions (or `--recreate-agent-container` flag); **never silently recreate** — that kills running user apps
 
 ### Egress
 
-- [ ] Egress CONNECT proxy must be reachable from inside the container: listen on the docker bridge gateway (configurable bind addr) instead of loopback-only; container env sets `HTTPS_PROXY=http://host.docker.internal:9080`, `NODE_USE_ENV_PROXY=1` (mirrors the current `agent-server.service` setup)
-- [ ] Verify the egress internal listener (permission requests) path works from the container, or scope it explicitly out with a documented follow-up
+- [x] Egress CONNECT proxy must be reachable from inside the container: listen on the docker bridge gateway (configurable bind addr) instead of loopback-only; container env sets `HTTPS_PROXY=http://host.docker.internal:9080`, `NODE_USE_ENV_PROXY=1` (mirrors the current `agent-server.service` setup)
+- [x] Verify the egress internal listener (permission requests) path works from the container, or scope it explicitly out with a documented follow-up
 
 ### Deploy scripts
 
-- [ ] `deploy/system-setup.sh`: install docker (or podman) on the host; drop the `appx-agent` user/`agent-server.service` path for container mode; decide and document how appx invokes docker — recommend **rootless docker or host podman for the appx user** over adding appx to the `docker` group (docker group membership is root-equivalent; avoid if practical, document the trade-off if not)
-- [ ] `deploy/tools-install.sh` / `bootstrap.sh`: pull/build the outer image (pin by tag/digest), remove host Node/agent-server install steps for container mode
-- [ ] Keep the systemd host-mode path working until container mode has run in production for a while (delete in a later cleanup phase)
+- [x] `deploy/system-setup.sh`: install docker (or podman) on the host; drop the `appx-agent` user/`agent-server.service` path for container mode; decide and document how appx invokes docker — recommend **rootless docker or host podman for the appx user** over adding appx to the `docker` group (docker group membership is root-equivalent; avoid if practical, document the trade-off if not)
+- [x] `deploy/tools-install.sh` / `bootstrap.sh`: pull/build the outer image (pin by tag/digest), remove host Node/agent-server install steps for container mode
+- [x] Keep the systemd host-mode path working until container mode has run in production for a while (delete in a later cleanup phase)
 
 ### Tests (Stage 3)
 
-- [ ] Unit: supervisor logic against fake CLI runner (absent→create, stopped→start, running→noop, unhealthy→error), spec construction from config, token generation/persistence
-- [ ] `scripts/smoke-deploy.sh` (Linux, CI nightly): build/pull outer image → start appx in container mode (`--http`) → `POST /api/projects` → assert agent-server inside the container has the project with correct dev+prod port metadata → build **the seeded template** once and run DEV+PROD instances via `docker exec` running the deploy skill's literal commands (**deliberately no LLM** — deterministic infra validation) → `curl` both `http://<name>-dev.127.0.0.1.sslip.io:<port>` and `http://<name>.127.0.0.1.sslip.io:<port>` through the appx proxy → redeploy a modified DEV → assert DEV changed while PROD is unchanged → promote → assert PROD changed → restart outer container → assert registry intact and UI shows apps stopped
-- [ ] Router tests: assert DEV/PROD port selection from the `-dev` label and WebSocket upgrade passthrough (the proxy target is still `127.0.0.1:<port>`; only the port choice is new)
+- [x] Unit: supervisor logic against fake CLI runner (absent→create, stopped→start, running→noop, unhealthy→error), spec construction from config, token generation/persistence
+- [x] `scripts/smoke-deploy.sh` (Linux, CI nightly): build/pull outer image → start appx in container mode (`--http`) → `POST /api/projects` → assert agent-server inside the container has the project with correct dev+prod port metadata → build **the seeded template** once and run DEV+PROD instances via `docker exec` running the deploy skill's literal commands (**deliberately no LLM** — deterministic infra validation) → `curl` both `http://<name>-dev.127.0.0.1.sslip.io:<port>` and `http://<name>.127.0.0.1.sslip.io:<port>` through the appx proxy → redeploy a modified DEV → assert DEV changed while PROD is unchanged → promote → assert PROD changed → restart outer container → assert registry intact and UI shows apps stopped
+- [x] Router tests: assert DEV/PROD port selection from the `-dev` label and WebSocket upgrade passthrough (the proxy target is still `127.0.0.1:<port>`; only the port choice is new)
 
 **Acceptance:** fresh Linux VM → bootstrap → appx boots, container exists and is healthy → full UI e2e; appx restart and outer-container restart both recover cleanly.
 
-## Stage 4 — Hardening (appx items)
+---
+
+## Stage 3 — Results (appx supervises the outer container)
+
+**Date:** 2026-06-12
+**Status:** COMPLETE — `scripts/smoke-deploy.sh` exits 0 (38/38) on the same
+Ubuntu 26.04 / kernel 7.0 Hetzner VM as Stages 0–2; agent-server's Stage 0
+`container/smoke.sh` (11/11) and Stage 2 `scripts/container-smoke.sh` (31/31)
+remain green (baseline re-run before this work). All Go unit tests pass,
+including the supervisor state machine, spec construction, token gen/persist, and
+the router DEV/PROD + WebSocket-passthrough tests (the last landed in Stage 1).
+`docker inspect` on the **appx-created** container confirms `Privileged=false`,
+`CapAdd=[]`, no `no-new-privileges`, no `/dev/fuse`, publishes loopback-only.
+
+### What landed (appx side)
+
+- **`internal/containerruntime`** — `Supervisor` interface + a docker-CLI
+  implementation (`DockerSupervisor`) + a fake `CommandRunner` at the seam.
+  `EnsureRunning` is the idempotent absent→create / stopped→start / running→noop
+  state machine, then polls agent-server `GET /` until healthy. Structured errors
+  (`ErrDaemonUnavailable`, `ErrImageMissing`, `ErrUnhealthy`, `SpecDriftError`).
+  `ContainerSpec.RunArgs()` transcribes the proven run-outer.sh flag set
+  **verbatim** (deletion-tested by `TestRunArgs_VerbatimSecurityFlagSet`, which
+  also asserts the forbidden flags are absent). `Recreate` is the explicit
+  operator path; drift **never** auto-recreates.
+- **Wiring (`cmd/appx/main.go`)** — `APPX_AGENT_CONTAINER=true` builds the spec
+  from config and `EnsureRunning`s the container *before* `ReconcileAgentProjects`,
+  failing loudly with per-class remediation hints. Token mandatory in container
+  mode: generated once, persisted `0600` to `.appx-internals/agent-server-token`,
+  injected into both the container env and the proxy clients.
+  `--recreate-agent-container` / `APPX_RECREATE_AGENT_CONTAINER` for explicit drift
+  remediation.
+- **Egress across the bridge** — in container mode the CONNECT proxy + internal
+  listener bind on the docker bridge gateway (auto-detected via
+  `docker network inspect bridge`, override `APPX_EGRESS_BIND`); the container
+  reaches them via `--add-host=host.docker.internal:host-gateway` and
+  `HTTPS_PROXY=http://host.docker.internal:9080` + `NODE_USE_ENV_PROXY=1`.
+- **Deploy scripts** — `system-setup.sh`/`tools-install.sh`/`bootstrap.sh` gained
+  a container-mode branch (skip the `appx-agent` user + `agent-server.service`,
+  install the seccomp profile to `/etc/appx/`, build/pull the outer image, set up
+  docker access for the appx user). The systemd host-mode path is preserved until
+  container mode soaks in prod.
+- **`scripts/smoke-deploy.sh`** — the deterministic NO-LLM cross-service gate
+  (sibling of `container-smoke.sh`) exercising the **appx proxy**.
+
+### Decisions (industry-standard option + why)
+
+- **docker-CLI vs Docker Go SDK → CLI (D3).** Industry-standard for a single
+  container's lifecycle is debatable, but the SDK's dependency tree isn't worth
+  one container; the CLI also works against docker **or** podman on the host for
+  free. Behind a `CommandRunner` seam so unit tests need no daemon.
+- **Docker invocation privilege → prefer rootless docker / host podman; docker
+  group is the documented fallback.** The standard secure option is rootless
+  (docker-group membership is root-equivalent: `docker run -v /:/host` owns the
+  box). `system-setup.sh` leaves a working rootless/podman setup alone and only
+  falls back to the `docker` group with a loud warning, because the alternative is
+  a non-functional deploy. Long-term target: rootless. (On this VM the operator
+  user is in the `docker` group — matches Stage 2's invoker choice.)
+- **Egress bind → docker bridge gateway, not `0.0.0.0`.** The standard options are
+  (a) `0.0.0.0` (simple, over-exposed) or (b) the specific bridge gateway IP
+  (reachable from the container, not from external interfaces). We chose (b): bind
+  the proxy on `172.17.0.1` (auto-detected) so only bridge-network containers can
+  reach it, and the allowlist + DNS-rebinding check still apply.
+
+### Deviations / findings
+
+- **HTTPS_PROXY is honoured by podman, not just Node — registry pulls broke.**
+  Injecting `HTTPS_PROXY` container-wide (required so agent-server's LLM traffic
+  traverses appx's egress proxy) also routed `podman pull` of base images through
+  the LLM allowlist, which rejected `registry-1.docker.io` with 403 (surfaced
+  immediately by the deterministic smoke — exactly the "egress crossing is the
+  highest-risk item" trap). **Fix:** the container-mode default `NO_PROXY`
+  bypasses common image registries (`.docker.io`, `.docker.com`, `ghcr.io`,
+  `quay.io`, `gcr.io`, `registry.k8s.io`) so image pulls go direct while the
+  secret-bearing LLM endpoints (not listed) still traverse the proxy. Overridable
+  via `APPX_AGENT_NO_PROXY`. Trade-off: registry pulls are not egress-controlled
+  (acceptable — the outer container is the trusted zone; inner apps get no proxy
+  env and no creds).
+- **`appRunning` (TCP-dial health) gives a false-positive after an outer
+  restart.** Loopback (`127.0.0.1`) publishes use docker's userland `docker-proxy`,
+  which accepts the host-side TCP connection even when the inner backend is down,
+  so the dial-based health check reports `appRunning=true` while the apps are
+  actually stopped (`docker restart` leaves inner podman containers `created`). The
+  smoke asserts the inner-container ground truth (`podman inspect` state) as the
+  required check and records `appRunning` as `[observe]`. **Follow-up (Stage 5):**
+  the UI "stopped"/degraded signal needs an HTTP-level probe, not a bare TCP dial.
+- **Egress permission-request path (internal listener, 9081) — scoped out.** No
+  current agent-server caller posts to `/egress/request`; appx still binds the
+  internal listener on the bridge gateway in container mode so it is reachable if
+  wired later, but the request path from inside the container is **not** verified
+  here. Documented follow-up. The CONNECT proxy (9080) path *is* verified: the
+  smoke proves an in-container CONNECT to a non-allowlisted host fails closed
+  (403) across the bridge; the full LLM-through-proxy success is the manual e2e
+  acceptance step (needs a real key).
+- **`systempaths=unconfined` is not a `SecurityOpt` in `docker inspect`** — it
+  manifests as cleared `MaskedPaths`/`ReadonlyPaths`. The smoke asserts
+  `MaskedPaths == []` rather than grepping `SecurityOpt`.
+- **seccomp profile duplicated into appx** (`deploy/builder-container/seccomp-builder.json`).
+  appx needs the file on the host at `docker run` time, so it cannot live only in
+  the image. It is a verbatim copy of agent-server's canonical profile; re-copy if
+  `gen-seccomp.sh` changes there (drift note in that dir's README).
+- **Bedrock API key set via the agent-client Settings UI does not work — an
+  upstream Pi gap, not appx/agent-server/the container.** `pi` sdk.ts passes the
+  stored credential as `options.apiKey`, but `amazon-bedrock.ts` authenticates only
+  from `options.bearerToken` / `AWS_BEARER_TOKEN_BEDROCK`; nothing maps
+  `apiKey → bearerToken`, so the AWS SDK falls to its default chain → "Could not
+  load credentials from any providers." Reproduces in host mode too. **Workaround:**
+  supply `AWS_BEARER_TOKEN_BEDROCK` + `AWS_REGION` as env, forwarded into the
+  container via `APPX_AGENT_ENV_PASSTHROUGH`. Proper fix is upstream Pi (Stage 5).
+- **Non-default provider endpoints must be in the egress allowlist (fails closed).**
+  Added `bedrock-runtime.*.amazonaws.com:443` to `egress.DefaultAllowlist` with
+  scoped DNS-wildcard matching in `IsAllowed` (`*` = a single label, like a
+  wildcard cert; label counts must match so it can't span a dot). Any other
+  provider (Vertex/Azure/self-hosted) similarly needs an allowlist entry.
+- **`APPX_AGENT_ENV_PASSTHROUGH`** (new) forwards extra env var *names* by value
+  into the container (default `ANTHROPIC_API_KEY`); docker forwards them from
+  appx's own process env if set, omits otherwise. Injected at container **create**
+  time, so changing them requires a recreate (`--recreate-agent-container`).
+
+### Verification on this VM
+
+1. Baseline: agent-server `container-smoke.sh` 31/31 green (re-run before work).
+2. `go test ./...` green (supervisor fake state machine, spec/`RunArgs` verbatim
+   flag set, token gen/persist, bridge-gateway parse, router DEV/PROD + WS).
+3. `scripts/smoke-deploy.sh` 38/38 green: appx (container mode) creates a healthy
+   outer container → create project → agent-server inside has dev+prod metadata →
+   build seeded template once + run DEV+PROD → curl both **through the appx proxy**
+   → redeploy DEV (DEV changes, PROD unchanged) → promote (PROD changes) → outer
+   restart (registry intact, apps stopped) → appx restart (no recreate).
+4. Manual LLM-through-proxy e2e (create→prompt→deploy→view→refine→promote against
+   DEV then PROD URLs) — requires a real key; not part of the deterministic gate.
+
+---
+
+## Stage 4 — Productionize (appx as a systemd service in container mode)
+
+Stage 3 proved appx supervises the outer container when **hand-run with env
+vars** (`./appx` with `APPX_AGENT_CONTAINER=true …`). Stage 4 makes that the
+production deployment — appx running as the `appx` systemd unit, in container
+mode, surviving reboots — without ever passing secrets on the command line.
+
+What's still needed (none of it changes the Stage 3 container/security model):
+
+- [ ] **systemd ordering** via a container-mode **drop-in**
+  (`/etc/systemd/system/appx.service.d/container.conf`, so the base unit stays
+  host-mode-clean): `Wants=docker.service` + `After=docker.service network.target`.
+  On reboot docker starts → appx's idempotent `EnsureRunning` re-attaches to the
+  existing container (no recreate, apps preserved).
+- [ ] **Secrets to the service env** (appx forwards them by name into the
+  container; never baked): `ANTHROPIC_API_KEY` and/or `AWS_BEARER_TOKEN_BEDROCK` +
+  `AWS_REGION` in `/etc/appx/appx.env` (0600) or an optional
+  `EnvironmentFile=-/etc/appx/secrets.env`, plus `APPX_AGENT_ENV_PASSTHROUGH`
+  listing the extra names. `AGENT_SERVER_TOKEN` is auto-generated + persisted 0600
+  by appx (no manual step).
+- [ ] **appx.env container-mode keys**: `APPX_AGENT_CONTAINER=true`,
+  `APPX_AGENT_IMAGE=<pinned tag/digest>`,
+  `APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json`. `bootstrap.sh` already
+  writes these commented; document enabling them. `system-setup.sh` already
+  branches on `APPX_AGENT_CONTAINER` (skips the `appx-agent` user +
+  `agent-server.service`, installs the seccomp profile, sets up docker access) —
+  **add the drop-in install there.**
+- [ ] **docker invocation by the `appx` user** — finalize rootless docker / host
+  podman (preferred) vs the `docker` group (root-equivalent fallback). Under
+  `User=appx` the service inherits the user's supplementary groups, so docker-group
+  works after `usermod` + `daemon-reload` + restart. Document; target rootless.
+- [ ] **443 without root** — already handled (`AmbientCapabilities=CAP_NET_BIND_SERVICE`
+  in `appx.service`); the manual `setcap` is only for hand-running the binary.
+- [ ] **start/restart semantics** — `Type=simple` (systemd doesn't wait on the
+  EnsureRunning health poll). On EnsureRunning failure appx `log.Fatal`s → exits →
+  `Restart=on-failure`; consider a longer `RestartSec` in container mode so a
+  missing image / down daemon doesn't hot-loop. First boot: `tools-install.sh`
+  builds/pulls the pinned image before `appx.service` starts.
+- [ ] **Soak**: reboot recovery, outer-container restart recovery, secrets reach
+  the container, full UI e2e over public HTTPS — then schedule deleting the
+  host-mode systemd path (`agent-server.service`) once container mode has run a
+  while.
+
+**Acceptance:** fresh box → `bootstrap.sh` (container mode) → reboot → the appx
+systemd unit is active, the outer container is healthy, and the full create →
+prompt → deploy → promote flow works over the public HTTPS URL with provider
+creds supplied only via the service env.
+
+## Stage 5 — Hardening (appx items)
 
 - [ ] Resource limits on the outer container (`--memory`, `--cpus`) via config with sane defaults
+- [ ] **App health via an HTTP probe, not a bare TCP dial** — the Stage 3 finding: docker's userland `docker-proxy` accepts the loopback connection even when the inner backend is down, so `appRunning` (a TCP dial) false-positives after an outer restart. Probe HTTP (or detect inner-container state) so the UI "stopped"/degraded signal is honest.
 - [ ] Dashboard surfacing of builder-container health (degraded banner when `Status` is unhealthy) — small UI addition, big debuggability win
+- [ ] **Upstream Pi: Bedrock credential mapping** — map a stored `amazon-bedrock` api_key credential to `bearerToken` (or accept `options.apiKey` in the provider) so the Settings-UI key works without the `AWS_BEARER_TOKEN_BEDROCK` env workaround (Stage 3 finding #1)
 - [ ] Security review pass (precedent: `docs/security/*de-docker*`): token handling, port exposure, docker invocation privilege, egress from inner containers
 - [ ] Optional golden-prompt LLM e2e (manual, pre-release) — owned jointly with agent-server plan
 

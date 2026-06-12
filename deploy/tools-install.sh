@@ -25,6 +25,17 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Container mode (Stage 3): agent-server runs INSIDE the appx-managed outer
+# container, so we build/pull that image instead of installing agent-server +
+# Pi on the host. Host mode (default until container mode soaks) is unchanged.
+APPX_AGENT_CONTAINER="false"
+if [ -f /etc/appx/appx.env ]; then
+  _CM=$(grep '^APPX_AGENT_CONTAINER=' /etc/appx/appx.env | cut -d= -f2- || true)
+  case "$(echo "${_CM}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) APPX_AGENT_CONTAINER="true" ;;
+  esac
+fi
+
 # Detect architecture.
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
 case "$ARCH" in
@@ -150,7 +161,9 @@ if [ -z "$AGENT_SERVER_DIR" ] && [ -d "$REPO_DIR/../agent-server" ]; then
   AGENT_SERVER_DIR="$(cd "$REPO_DIR/../agent-server" && pwd)"
 fi
 
-if [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/package.json" ]; then
+if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
+  echo "container mode: skipping host agent-server install (it runs inside the outer image)"
+elif [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/package.json" ]; then
   echo "installing agent-server from $AGENT_SERVER_DIR..."
   (
     cd "$AGENT_SERVER_DIR"
@@ -196,6 +209,36 @@ else
       break
     fi
   done
+fi
+
+# ---------------------------------------------------------------------------
+# Outer builder image (container mode) — build from the agent-server checkout
+# or pull a pinned tag/digest.
+# ---------------------------------------------------------------------------
+
+if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
+  RUNTIME=""
+  command -v docker >/dev/null 2>&1 && RUNTIME="docker"
+  [ -z "$RUNTIME" ] && command -v podman >/dev/null 2>&1 && RUNTIME="podman"
+
+  # Pin the image. APPX_AGENT_IMAGE may be a tag (built locally) or a registry
+  # ref / digest to pull (e.g. registry.example.com/builder-outer@sha256:...).
+  APPX_AGENT_IMAGE="${APPX_AGENT_IMAGE:-builder-outer}"
+
+  if [ -z "$RUNTIME" ]; then
+    echo "WARNING: no docker/podman found — cannot build/pull the outer image '$APPX_AGENT_IMAGE'"
+  elif printf '%s' "$APPX_AGENT_IMAGE" | grep -q '/'; then
+    # Looks like a registry reference → pull it (pinned by tag or digest).
+    echo "pulling outer image: $APPX_AGENT_IMAGE"
+    "$RUNTIME" pull "$APPX_AGENT_IMAGE"
+  elif [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/container/Dockerfile" ]; then
+    echo "building outer image '$APPX_AGENT_IMAGE' from $AGENT_SERVER_DIR ..."
+    "$RUNTIME" build -f "$AGENT_SERVER_DIR/container/Dockerfile" -t "$APPX_AGENT_IMAGE" "$AGENT_SERVER_DIR"
+    echo "built outer image: $APPX_AGENT_IMAGE"
+  else
+    echo "WARNING: APPX_AGENT_IMAGE='$APPX_AGENT_IMAGE' is a local tag but no agent-server checkout was found to build it."
+    echo "         Clone appx-org/agent-server next to appx, set AGENT_SERVER_DIR, or set APPX_AGENT_IMAGE to a pullable ref."
+  fi
 fi
 
 # ---------------------------------------------------------------------------

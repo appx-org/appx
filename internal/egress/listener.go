@@ -13,14 +13,25 @@ import (
 // request endpoint. Bound to localhost only — no auth needed.
 const InternalAddr = "127.0.0.1:9081"
 
-// ListenAndServeInternal starts the internal HTTP listener that accepts egress
-// permission requests from the agent. Blocks until the listener is closed.
+// InternalPort is the internal listener's TCP port (see ProxyPort).
+const InternalPort = "9081"
+
+// ListenAndServeInternal starts the internal HTTP listener on the default
+// loopback address. See ListenAndServeInternalAddr for the configurable form.
 func ListenAndServeInternal(registry *PendingRegistry) error {
-	ln, err := net.Listen("tcp", InternalAddr)
+	return ListenAndServeInternalAddr(registry, InternalAddr)
+}
+
+// ListenAndServeInternalAddr starts the internal HTTP listener that accepts
+// egress permission requests from the agent on the given address. In container
+// mode the bind host is the docker bridge gateway so the in-container agent can
+// reach it via host.docker.internal. Blocks until the listener is closed.
+func ListenAndServeInternalAddr(registry *PendingRegistry, addr string) error {
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("egress internal listener: %w", err)
 	}
-	log.Printf("Egress internal listener on %s", InternalAddr)
+	log.Printf("Egress internal listener on %s", addr)
 	srv := &http.Server{
 		Handler:           newInternalHandler(registry),
 		ReadHeaderTimeout: 10 * time.Second,

@@ -175,3 +175,58 @@ func TestIsAllowed(t *testing.T) {
 		t.Error("expected api.anthropic.com:80 blocked (wrong port)")
 	}
 }
+
+func TestIsAllowed_BedrockWildcard(t *testing.T) {
+	db := setupTestDB(t)
+	s := NewStore(db)
+
+	allowed := []struct {
+		host string
+		port int
+	}{
+		{"bedrock-runtime.us-east-1.amazonaws.com", 443},
+		{"bedrock-runtime.eu-west-1.amazonaws.com", 443},
+		{"bedrock-runtime.ap-southeast-2.amazonaws.com", 443},
+	}
+	for _, c := range allowed {
+		if !s.IsAllowed(c.host, c.port) {
+			t.Errorf("expected %s:%d allowed by default bedrock wildcard", c.host, c.port)
+		}
+	}
+
+	blocked := []struct {
+		host string
+		port int
+	}{
+		{"bedrock-runtime.us-east-1.amazonaws.com", 80},               // wrong port
+		{"bedrock-runtime.us-east-1.amazonaws.com.evil.com", 443},     // extra labels after suffix
+		{"evil.bedrock-runtime.x.amazonaws.com", 443},                 // extra label before prefix
+		{"bedrock-runtime.a.b.amazonaws.com", 443},                    // '*' must be a single label
+		{"bedrock.us-east-1.amazonaws.com", 443},                      // control-plane host not allowed
+	}
+	for _, c := range blocked {
+		if s.IsAllowed(c.host, c.port) {
+			t.Errorf("expected %s:%d BLOCKED", c.host, c.port)
+		}
+	}
+}
+
+func TestWildcardHostMatch(t *testing.T) {
+	cases := []struct {
+		pattern, host string
+		want          bool
+	}{
+		{"bedrock-runtime.*.amazonaws.com", "bedrock-runtime.us-east-1.amazonaws.com", true},
+		{"bedrock-runtime.*.amazonaws.com", "bedrock-runtime..amazonaws.com", true}, // '*' may match empty label segment
+		{"bedrock-runtime.*.amazonaws.com", "bedrock-runtime.a.b.amazonaws.com", false},
+		{"*.example.com", "api.example.com", true},
+		{"*.example.com", "example.com", false},
+		{"api.example.com", "api.example.com", true},
+		{"api.example.com", "evil.com", false},
+	}
+	for _, c := range cases {
+		if got := wildcardHostMatch(c.pattern, c.host); got != c.want {
+			t.Errorf("wildcardHostMatch(%q, %q) = %v, want %v", c.pattern, c.host, got, c.want)
+		}
+	}
+}
