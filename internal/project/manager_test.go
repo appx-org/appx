@@ -11,20 +11,23 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// fakeAgent is an in-memory AgentRegistrar that records calls and can be primed
-// to fail, so Manager lifecycle behaviour is tested without a real agent-server.
+// fakeAgent is an in-memory AgentRegistrar that records calls (including the
+// deployment payload) and can be primed to fail, so Manager lifecycle behaviour
+// is tested without a real agent-server.
 type fakeAgent struct {
-	ensured    []string
-	deleted    []string
-	ensureErr  error
-	deleteErr  error
+	ensured     []string
+	deployments []Deployment
+	deleted     []string
+	ensureErr   error
+	deleteErr   error
 }
 
-func (f *fakeAgent) EnsureProject(_ context.Context, name string) error {
+func (f *fakeAgent) EnsureProject(_ context.Context, name string, dep Deployment) error {
 	if f.ensureErr != nil {
 		return f.ensureErr
 	}
 	f.ensured = append(f.ensured, name)
+	f.deployments = append(f.deployments, dep)
 	return nil
 }
 
@@ -60,9 +63,11 @@ func setupManagerTest(t *testing.T) (*Manager, *fakeAgent, *sql.DB) {
 			last_error TEXT,
 			resources TEXT,
 			container_secret TEXT,
-			assigned_port INTEGER
+			assigned_port INTEGER,
+			dev_port INTEGER
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_assigned_port ON projects(assigned_port) WHERE assigned_port IS NOT NULL;
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_port ON projects(dev_port) WHERE dev_port IS NOT NULL;
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -219,6 +224,80 @@ func TestManagerReconcileAgentProjects_RegistersAll(t *testing.T) {
 	}
 	if len(agent.ensured) != 2 {
 		t.Errorf("expected 2 re-registrations, got %v", agent.ensured)
+	}
+}
+
+func TestManagerCreate_PushesDeploymentPayload(t *testing.T) {
+	mgr, agent, _ := setupManagerTest(t)
+	mgr.HTTPMode = true
+	mgr.BaseDomain = "127.0.0.1.sslip.io"
+	mgr.ExternalPort = 8080
+
+	p, err := mgr.Create(context.Background(), "eventx")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(agent.deployments) != 1 {
+		t.Fatalf("expected 1 deployment payload, got %d", len(agent.deployments))
+	}
+	dep := agent.deployments[0]
+	if dep.Prod.Port != p.AssignedPort || dep.Dev.Port != p.DevPort {
+		t.Errorf("ports: got dev=%d prod=%d, want dev=%d prod=%d", dep.Dev.Port, dep.Prod.Port, p.DevPort, p.AssignedPort)
+	}
+	if dep.Prod.URL != "http://eventx.127.0.0.1.sslip.io:8080" {
+		t.Errorf("prod URL: got %q", dep.Prod.URL)
+	}
+	if dep.Dev.URL != "http://eventx-dev.127.0.0.1.sslip.io:8080" {
+		t.Errorf("dev URL: got %q", dep.Dev.URL)
+	}
+}
+
+func TestManagerReconcile_PushesDeploymentPayload(t *testing.T) {
+	mgr, agent, _ := setupManagerTest(t)
+	mgr.BaseDomain = "example.com" // HTTPS production defaults
+
+	if _, err := mgr.Create(context.Background(), "eventx"); err != nil {
+		t.Fatal(err)
+	}
+	agent.ensured = nil
+	agent.deployments = nil
+
+	if err := mgr.ReconcileAgentProjects(context.Background()); err != nil {
+		t.Fatalf("ReconcileAgentProjects: %v", err)
+	}
+	if len(agent.deployments) != 1 {
+		t.Fatalf("expected 1 reconcile payload, got %d", len(agent.deployments))
+	}
+	dep := agent.deployments[0]
+	if dep.Prod.URL != "https://eventx.example.com" {
+		t.Errorf("prod URL: got %q, want https://eventx.example.com", dep.Prod.URL)
+	}
+	if dep.Dev.URL != "https://eventx-dev.example.com" {
+		t.Errorf("dev URL: got %q, want https://eventx-dev.example.com", dep.Dev.URL)
+	}
+}
+
+func TestManagerAppURL_SchemeAndPortRules(t *testing.T) {
+	cases := []struct {
+		name       string
+		httpMode   bool
+		baseDomain string
+		port       int
+		label      string
+		want       string
+	}{
+		{"https default port elided", false, "example.com", 443, "eventx", "https://eventx.example.com"},
+		{"https custom port appended", false, "example.com", 8443, "eventx", "https://eventx.example.com:8443"},
+		{"http dev port appended", true, "127.0.0.1.sslip.io", 8080, "eventx-dev", "http://eventx-dev.127.0.0.1.sslip.io:8080"},
+		{"http default port elided", true, "localhost", 80, "eventx", "http://eventx.localhost"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manager{HTTPMode: tc.httpMode, BaseDomain: tc.baseDomain, ExternalPort: tc.port}
+			if got := m.appURL(tc.label); got != tc.want {
+				t.Errorf("appURL(%q) = %q, want %q", tc.label, got, tc.want)
+			}
+		})
 	}
 }
 

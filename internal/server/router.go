@@ -141,10 +141,30 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 			return
 		}
 
+		// A `-dev` label addresses the project's DEV environment; everything else
+		// is PROD. The `-dev` reserved-suffix guard on project names (ValidateName)
+		// means `<name>-dev` is unambiguously project `<name>`'s dev URL.
+		lookupName := projectName
+		wantDev := strings.HasSuffix(projectName, "-dev")
+		if wantDev {
+			lookupName = strings.TrimSuffix(projectName, "-dev")
+		}
+
 		// Look up the project.
-		proj, err := pm.Store.GetByName(projectName)
+		proj, err := pm.Store.GetByName(lookupName)
 		if err != nil {
 			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+
+		// Select DEV vs PROD port from the label. The proxy target is still
+		// 127.0.0.1:<port>; only the port choice changes.
+		targetPort := proj.AssignedPort
+		if wantDev {
+			targetPort = proj.DevPort
+		}
+		if targetPort == 0 {
+			http.Error(w, "environment not available", http.StatusNotFound)
 			return
 		}
 
@@ -162,7 +182,7 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 			// are not killed by the server's WriteTimeout.
 			http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
-			target, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", proj.AssignedPort))
+			target, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", targetPort))
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return

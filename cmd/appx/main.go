@@ -157,6 +157,10 @@ func main() {
 	}
 	pm := project.NewManager(projectStore, projectRoot)
 	pm.BaseDomain = baseDomain
+	// External edge knobs for public DEV/PROD URL construction (appx's own
+	// scheme/host/port, not the app's internal port).
+	pm.HTTPMode = *httpMode
+	pm.ExternalPort = *port
 
 	agentServerURL := envOr("APPX_AGENT_SERVER_URL", "http://127.0.0.1:4001")
 	agentServerToken := os.Getenv("APPX_AGENT_SERVER_TOKEN")

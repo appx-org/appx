@@ -13,9 +13,11 @@ import (
 // agentserver package) so the project package stays dependency-light and easy
 // to test with a fake.
 type AgentRegistrar interface {
-	// EnsureProject registers a project by name (idempotent on name). The
-	// agent-server creates WORKSPACE_DIR/{id}/ and persists project metadata.
-	EnsureProject(ctx context.Context, name string) error
+	// EnsureProject registers a project by name (idempotent on name) along with
+	// its dev+prod deployment metadata. The agent-server creates
+	// WORKSPACE_DIR/{id}/ and persists the metadata; a same-name re-POST updates
+	// it (healing drift for pre-existing projects).
+	EnsureProject(ctx context.Context, name string, dep Deployment) error
 	// DeleteProject removes a project by its agent-server id (idempotent),
 	// including its directory and session transcripts.
 	DeleteProject(ctx context.Context, id string) error
@@ -33,10 +35,16 @@ type AgentRegistrar interface {
 type Manager struct {
 	Store       *Store
 	ProjectRoot string
-	// BaseDomain is retained for control-plane URL construction and future
-	// harness templating; it no longer drives any filesystem scaffolding.
+	// BaseDomain is the external base domain used to construct each project's
+	// public DEV/PROD URLs (`<name>` / `<name>-dev`).
 	BaseDomain string
-	Agent      AgentRegistrar // optional; nil disables agent-server registration
+	// HTTPMode mirrors appx's --http dev mode: it selects the http scheme and
+	// causes the external listen port to be appended to constructed URLs.
+	HTTPMode bool
+	// ExternalPort is appx's own listen port (the edge), used to build URLs in
+	// dev mode. Not the app's internal/assigned port.
+	ExternalPort int
+	Agent        AgentRegistrar // optional; nil disables agent-server registration
 }
 
 // NewManager creates a Manager backed by the given project store. The projectRoot
@@ -72,7 +80,7 @@ func (m *Manager) Create(ctx context.Context, name string) (*Project, error) {
 	}
 
 	if m.Agent != nil {
-		if err := m.Agent.EnsureProject(ctx, proj.Name); err != nil {
+		if err := m.Agent.EnsureProject(ctx, proj.Name, m.deploymentFor(proj)); err != nil {
 			// Roll back only our own freshly-created record.
 			_ = m.Store.Delete(proj.ID)
 			return nil, fmt.Errorf("register project with agent-server: %w", err)
@@ -80,6 +88,37 @@ func (m *Manager) Create(ctx context.Context, name string) (*Project, error) {
 	}
 
 	return proj, nil
+}
+
+// deploymentFor builds the dev+prod deployment metadata appx pushes to
+// agent-server: each environment's host port plus the public URL appx will
+// route to it. PROD is `<name>.<domain>`, DEV is `<name>-dev.<domain>`.
+func (m *Manager) deploymentFor(proj *Project) Deployment {
+	return Deployment{
+		Dev:  EnvTarget{Port: proj.DevPort, URL: m.appURL(proj.Name + "-dev")},
+		Prod: EnvTarget{Port: proj.AssignedPort, URL: m.appURL(proj.Name)},
+	}
+}
+
+// appURL constructs a project's public URL from appx's *external* scheme, host,
+// and listen port — never the app's internal port. In --http dev mode the
+// listen port is appended (e.g. http://<label>.<domain>:8080); in HTTPS mode
+// the default 443 is elided.
+func (m *Manager) appURL(label string) string {
+	scheme := "https"
+	defaultPort := 443
+	if m.HTTPMode {
+		scheme = "http"
+		defaultPort = 80
+	}
+	host := label
+	if m.BaseDomain != "" {
+		host = label + "." + m.BaseDomain
+	}
+	if m.ExternalPort != 0 && m.ExternalPort != defaultPort {
+		return fmt.Sprintf("%s://%s:%d", scheme, host, m.ExternalPort)
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
 // Delete removes a project. The agent-server owns the directory and session
@@ -144,7 +183,7 @@ func (m *Manager) ReconcileAgentProjects(ctx context.Context) error {
 	}
 	var errs []error
 	for _, proj := range projects {
-		if err := m.Agent.EnsureProject(ctx, proj.Name); err != nil {
+		if err := m.Agent.EnsureProject(ctx, proj.Name, m.deploymentFor(proj)); err != nil {
 			errs = append(errs, fmt.Errorf("register %q: %w", proj.Name, err))
 		}
 	}

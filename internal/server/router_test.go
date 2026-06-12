@@ -32,6 +32,7 @@ const testSchema = `
 		name TEXT UNIQUE NOT NULL,
 		status TEXT DEFAULT 'stopped',
 		assigned_port INTEGER,
+		dev_port INTEGER,
 		last_error TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -857,12 +858,12 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"path":       r.URL.Path,
-			"query":      r.URL.RawQuery,
-			"method":     r.Method,
+			"path":   r.URL.Path,
+			"query":  r.URL.RawQuery,
+			"method": r.Method,
 			// agent-server resolves the project from its own registry; appx must
 			// not leak any internal project headers to it.
-			"projectId":  r.Header.Get(agentProjectIDHeader),
+			"projectId": r.Header.Get(agentProjectIDHeader),
 		})
 	}))
 	defer backend.Close()

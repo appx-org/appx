@@ -31,9 +31,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 			last_error TEXT,
 			resources TEXT,
 			container_secret TEXT,
-			assigned_port INTEGER
+			assigned_port INTEGER,
+			dev_port INTEGER
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_assigned_port ON projects(assigned_port) WHERE assigned_port IS NOT NULL;
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_port ON projects(dev_port) WHERE dev_port IS NOT NULL;
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +53,12 @@ func TestCreate_ValidName(t *testing.T) {
 	if p.Name != "my-app" {
 		t.Errorf("expected name my-app, got %s", p.Name)
 	}
+	// PROD = lower of the pair, DEV = next.
 	if p.AssignedPort != PortRangeStart {
-		t.Errorf("expected port %d, got %d", PortRangeStart, p.AssignedPort)
+		t.Errorf("expected prod port %d, got %d", PortRangeStart, p.AssignedPort)
+	}
+	if p.DevPort != PortRangeStart+1 {
+		t.Errorf("expected dev port %d, got %d", PortRangeStart+1, p.DevPort)
 	}
 	if p.Status != StatusStopped {
 		t.Errorf("expected status stopped, got %s", p.Status)
@@ -62,23 +68,23 @@ func TestCreate_ValidName(t *testing.T) {
 	}
 }
 
-func TestCreate_AutoAssignsPorts(t *testing.T) {
+func TestCreate_AutoAssignsPortPairs(t *testing.T) {
 	store := NewStore(setupTestDB(t))
 
 	p1, err := store.Create("app-a")
 	if err != nil {
 		t.Fatalf("create app-a: %v", err)
 	}
-	if p1.AssignedPort != 10000 {
-		t.Errorf("expected 10000, got %d", p1.AssignedPort)
+	if p1.AssignedPort != 10000 || p1.DevPort != 10001 {
+		t.Errorf("app-a: expected prod=10000 dev=10001, got prod=%d dev=%d", p1.AssignedPort, p1.DevPort)
 	}
 
 	p2, err := store.Create("app-b")
 	if err != nil {
 		t.Fatalf("create app-b: %v", err)
 	}
-	if p2.AssignedPort != 10001 {
-		t.Errorf("expected 10001, got %d", p2.AssignedPort)
+	if p2.AssignedPort != 10002 || p2.DevPort != 10003 {
+		t.Errorf("app-b: expected prod=10002 dev=10003, got prod=%d dev=%d", p2.AssignedPort, p2.DevPort)
 	}
 }
 
@@ -105,6 +111,21 @@ func TestCreate_InvalidNames(t *testing.T) {
 		if err != ErrInvalidName {
 			t.Errorf("name %q: expected ErrInvalidName, got %v", name, err)
 		}
+	}
+}
+
+func TestValidateName_RejectsReservedDevSuffix(t *testing.T) {
+	if err := ValidateName("foo-dev"); err != ErrReservedNameSuffix {
+		t.Errorf("ValidateName(\"foo-dev\"): expected ErrReservedNameSuffix, got %v", err)
+	}
+	// A name merely containing "dev" is fine.
+	if err := ValidateName("developer"); err != nil {
+		t.Errorf("ValidateName(\"developer\"): unexpected %v", err)
+	}
+	// Create surfaces the same rejection.
+	store := NewStore(setupTestDB(t))
+	if _, err := store.Create("myapp-dev"); err != ErrReservedNameSuffix {
+		t.Errorf("Create(\"myapp-dev\"): expected ErrReservedNameSuffix, got %v", err)
 	}
 }
 
@@ -165,7 +186,10 @@ func TestGet_Found(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.AssignedPort != PortRangeStart {
-		t.Errorf("expected port %d, got %d", PortRangeStart, got.AssignedPort)
+		t.Errorf("expected prod port %d, got %d", PortRangeStart, got.AssignedPort)
+	}
+	if got.DevPort != PortRangeStart+1 {
+		t.Errorf("expected dev port %d, got %d", PortRangeStart+1, got.DevPort)
 	}
 }
 
@@ -188,18 +212,19 @@ func TestDelete_NotFound(t *testing.T) {
 	}
 }
 
-func TestDelete_FreesPort(t *testing.T) {
+func TestDelete_FreesPortPair(t *testing.T) {
 	store := NewStore(setupTestDB(t))
-	p1, _ := store.Create("app-a")
-	store.Create("app-b")
+	p1, _ := store.Create("app-a") // 10000/10001
+	store.Create("app-b")          // 10002/10003
 	store.Delete(p1.ID)
 
 	p3, err := store.Create("app-c")
 	if err != nil {
 		t.Fatalf("create app-c: %v", err)
 	}
-	if p3.AssignedPort != PortRangeStart {
-		t.Errorf("expected port %d (reused), got %d", PortRangeStart, p3.AssignedPort)
+	// The freed pair (lowest gap) is reused.
+	if p3.AssignedPort != 10000 || p3.DevPort != 10001 {
+		t.Errorf("expected reused pair 10000/10001, got %d/%d", p3.AssignedPort, p3.DevPort)
 	}
 }
 
@@ -238,63 +263,68 @@ func TestGetByName(t *testing.T) {
 	}
 }
 
-func TestNextAvailablePort_Empty(t *testing.T) {
-	store := NewStore(setupTestDB(t))
-	port, err := store.nextAvailablePort()
+func TestPairAllocation_GapFilling(t *testing.T) {
+	db := setupTestDB(t)
+	store := NewStore(db)
+	// Occupy 10000 (prod) and 10003 (dev) in one row, leaving 10001/10002 free.
+	db.Exec("INSERT INTO projects (id, name, assigned_port, dev_port) VALUES ('a', 'app-a', 10000, 10003)")
+
+	p, err := store.Create("app-b")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("create: %v", err)
 	}
-	if port != PortRangeStart {
-		t.Errorf("expected %d, got %d", PortRangeStart, port)
+	if p.AssignedPort != 10001 || p.DevPort != 10002 {
+		t.Errorf("expected gap-filled pair 10001/10002, got %d/%d", p.AssignedPort, p.DevPort)
 	}
 }
 
-func TestNextAvailablePort_GapFilling(t *testing.T) {
-	db := setupTestDB(t)
-	store := NewStore(db)
-	db.Exec("INSERT INTO projects (id, name, assigned_port) VALUES ('a', 'app-a', 10000)")
-	db.Exec("INSERT INTO projects (id, name, assigned_port) VALUES ('b', 'app-b', 10002)")
-
-	port, err := store.nextAvailablePort()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if port != 10001 {
-		t.Errorf("expected 10001, got %d", port)
-	}
-}
-
-func TestNextAvailablePort_Sequential(t *testing.T) {
-	db := setupTestDB(t)
-	store := NewStore(db)
-	db.Exec("INSERT INTO projects (id, name, assigned_port) VALUES ('a', 'app-a', 10000)")
-	db.Exec("INSERT INTO projects (id, name, assigned_port) VALUES ('b', 'app-b', 10001)")
-
-	port, err := store.nextAvailablePort()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if port != 10002 {
-		t.Errorf("expected 10002, got %d", port)
-	}
-}
-
-func TestNextAvailablePort_RangeExhausted(t *testing.T) {
+func TestPairAllocation_CapBoundary(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewStore(db)
 
-	for i := PortRangeStart; i <= PortRangeEnd; i++ {
-		name := fmt.Sprintf("app-%d", i)
-		id := fmt.Sprintf("id-%d", i)
-		_, err := db.Exec("INSERT INTO projects (id, name, assigned_port) VALUES (?, ?, ?)", id, name, i)
+	// Fill 49 pairs (10000..10097), then occupy 10098 alone, leaving only the
+	// single port 10199 free — not enough for a pair, so Create must fail.
+	id := 0
+	for port := PortRangeStart; port <= PublishedPortRangeEnd-2; port += 2 {
+		_, err := db.Exec(
+			"INSERT INTO projects (id, name, assigned_port, dev_port) VALUES (?, ?, ?, ?)",
+			fmt.Sprintf("id-%d", id), fmt.Sprintf("app-%d", id), port, port+1,
+		)
 		if err != nil {
-			t.Fatalf("insert port %d: %v", i, err)
+			t.Fatalf("seed pair at %d: %v", port, err)
 		}
+		id++
 	}
+	if _, err := db.Exec(
+		"INSERT INTO projects (id, name, assigned_port) VALUES ('solo', 'app-solo', ?)",
+		PublishedPortRangeEnd-1,
+	); err != nil {
+		t.Fatalf("seed solo port: %v", err)
+	}
+	if _, err := store.Create("last"); err != ErrNoPortAvailable {
+		t.Errorf("expected ErrNoPortAvailable with one free port, got %v", err)
+	}
+}
 
-	_, err := store.nextAvailablePort()
-	if err != ErrNoPortAvailable {
-		t.Errorf("expected ErrNoPortAvailable, got %v", err)
+func TestPairAllocation_RespectsCapNotFullRange(t *testing.T) {
+	db := setupTestDB(t)
+	store := NewStore(db)
+
+	// Fill the entire published range with pairs (10000..10199 = 100 projects).
+	id := 0
+	for port := PortRangeStart; port <= PublishedPortRangeEnd; port += 2 {
+		_, err := db.Exec(
+			"INSERT INTO projects (id, name, assigned_port, dev_port) VALUES (?, ?, ?, ?)",
+			fmt.Sprintf("id-%d", id), fmt.Sprintf("app-%d", id), port, port+1,
+		)
+		if err != nil {
+			t.Fatalf("seed pair at %d: %v", port, err)
+		}
+		id++
+	}
+	// Even though the DB range extends to PortRangeEnd, allocation is capped.
+	if _, err := store.Create("overflow"); err != ErrNoPortAvailable {
+		t.Errorf("expected ErrNoPortAvailable beyond published cap, got %v", err)
 	}
 }
 
@@ -326,12 +356,15 @@ func TestCreate_ConcurrentCreates_AllGetDistinctPorts(t *testing.T) {
 			t.Errorf("Create: unexpected error: %v", r.err)
 			continue
 		}
-		if ports[r.p.AssignedPort] {
-			t.Errorf("port %d assigned to multiple projects", r.p.AssignedPort)
-		}
-		ports[r.p.AssignedPort] = true
-		if r.p.AssignedPort < PortRangeStart || r.p.AssignedPort > PortRangeEnd {
-			t.Errorf("port %d out of range", r.p.AssignedPort)
+		// Both the PROD and DEV port of every pair must be globally distinct.
+		for _, port := range []int{r.p.AssignedPort, r.p.DevPort} {
+			if ports[port] {
+				t.Errorf("port %d assigned to multiple projects", port)
+			}
+			ports[port] = true
+			if port < PortRangeStart || port > PublishedPortRangeEnd {
+				t.Errorf("port %d out of published range", port)
+			}
 		}
 	}
 }

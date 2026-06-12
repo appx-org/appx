@@ -21,12 +21,13 @@ func NewStore(db *sql.DB) *Store {
 }
 
 // projectColumns is the canonical SELECT column list used by all project reads.
-const projectColumns = `id, name, status, assigned_port, last_error, created_at`
+const projectColumns = `id, name, status, assigned_port, dev_port, last_error, created_at`
 
-// Create inserts a new project with the given name and an auto-assigned port
-// from PortRangeStart-PortRangeEnd. Returns ErrInvalidName, ErrDuplicateName,
-// or ErrNoPortAvailable on failure. Wraps port allocation and INSERT in a
-// transaction to prevent TOCTOU race conditions on concurrent creates.
+// Create inserts a new project with the given name and an auto-assigned DEV+PROD
+// port pair from the published allocation range. Returns ErrInvalidName,
+// ErrReservedNameSuffix, ErrDuplicateName, or ErrNoPortAvailable on failure.
+// Wraps pair allocation and INSERT in a transaction to prevent TOCTOU races on
+// concurrent creates.
 func (s *Store) Create(name string) (*Project, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
@@ -38,15 +39,15 @@ func (s *Store) Create(name string) (*Project, error) {
 	}
 	defer tx.Rollback()
 
-	port, err := s.nextAvailablePortTx(tx)
+	prodPort, devPort, err := s.nextAvailablePortPairTx(tx)
 	if err != nil {
 		return nil, err
 	}
 
 	id := uuid.New().String()
 	_, err = tx.Exec(
-		"INSERT INTO projects (id, name, status, assigned_port) VALUES (?, ?, ?, ?)",
-		id, name, StatusStopped, port,
+		"INSERT INTO projects (id, name, status, assigned_port, dev_port) VALUES (?, ?, ?, ?, ?)",
+		id, name, StatusStopped, prodPort, devPort,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "projects.name") {
@@ -140,66 +141,54 @@ func (s *Store) SetError(id string, errMsg string) error {
 	return nil
 }
 
-// nextAvailablePort finds the lowest unused port in PortRangeStart-PortRangeEnd.
-// Fills gaps left by deleted projects. Returns ErrNoPortAvailable if all ports taken.
-func (s *Store) nextAvailablePort() (int, error) {
-	rows, err := s.db.Query(
-		"SELECT assigned_port FROM projects WHERE assigned_port IS NOT NULL ORDER BY assigned_port ASC",
-	)
+// usedPortsTx reads every allocated port (PROD assigned_port + DEV dev_port)
+// into a set, so the pair allocator never reuses a port held by either
+// environment of any project.
+func (s *Store) usedPortsTx(tx *sql.Tx) (map[int]bool, error) {
+	rows, err := tx.Query("SELECT assigned_port, dev_port FROM projects")
 	if err != nil {
-		return 0, fmt.Errorf("query assigned ports: %w", err)
+		return nil, fmt.Errorf("query allocated ports: %w", err)
 	}
 	defer rows.Close()
 
-	usedPorts := map[int]bool{}
+	used := map[int]bool{}
 	for rows.Next() {
-		var p int
-		if err := rows.Scan(&p); err != nil {
-			return 0, fmt.Errorf("scan port: %w", err)
+		var assigned, dev sql.NullInt64
+		if err := rows.Scan(&assigned, &dev); err != nil {
+			return nil, fmt.Errorf("scan ports: %w", err)
 		}
-		usedPorts[p] = true
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate ports: %w", err)
-	}
-
-	for port := PortRangeStart; port <= PortRangeEnd; port++ {
-		if !usedPorts[port] {
-			return port, nil
+		if assigned.Valid {
+			used[int(assigned.Int64)] = true
+		}
+		if dev.Valid {
+			used[int(dev.Int64)] = true
 		}
 	}
-	return 0, ErrNoPortAvailable
+	return used, rows.Err()
 }
 
-// nextAvailablePortTx is like nextAvailablePort but runs within a transaction.
-// Called from Create to ensure the port read and INSERT are atomic.
-func (s *Store) nextAvailablePortTx(tx *sql.Tx) (int, error) {
-	rows, err := tx.Query(
-		"SELECT assigned_port FROM projects WHERE assigned_port IS NOT NULL ORDER BY assigned_port ASC",
-	)
+// nextAvailablePortPairTx finds the two lowest unused ports in
+// PortRangeStart-PublishedPortRangeEnd and returns them as (prod, dev) with
+// prod the lower of the pair. Fills gaps left by deleted projects. Returns
+// ErrNoPortAvailable if fewer than two ports are free. Runs within a
+// transaction so the read and the INSERT in Create are atomic.
+func (s *Store) nextAvailablePortPairTx(tx *sql.Tx) (prod int, dev int, err error) {
+	used, err := s.usedPortsTx(tx)
 	if err != nil {
-		return 0, fmt.Errorf("query assigned ports: %w", err)
-	}
-	defer rows.Close()
-
-	usedPorts := map[int]bool{}
-	for rows.Next() {
-		var p int
-		if err := rows.Scan(&p); err != nil {
-			return 0, fmt.Errorf("scan port: %w", err)
-		}
-		usedPorts[p] = true
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate ports: %w", err)
+		return 0, 0, err
 	}
 
-	for port := PortRangeStart; port <= PortRangeEnd; port++ {
-		if !usedPorts[port] {
-			return port, nil
+	pair := make([]int, 0, 2)
+	for port := PortRangeStart; port <= PublishedPortRangeEnd; port++ {
+		if used[port] {
+			continue
+		}
+		pair = append(pair, port)
+		if len(pair) == 2 {
+			return pair[0], pair[1], nil
 		}
 	}
-	return 0, ErrNoPortAvailable
+	return 0, 0, ErrNoPortAvailable
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
@@ -211,9 +200,10 @@ type scanner interface {
 func scanInto(sc scanner) (*Project, error) {
 	var p Project
 	var assignedPort sql.NullInt64
+	var devPort sql.NullInt64
 	var lastError sql.NullString
 	err := sc.Scan(
-		&p.ID, &p.Name, &p.Status, &assignedPort,
+		&p.ID, &p.Name, &p.Status, &assignedPort, &devPort,
 		&lastError, &p.CreatedAt,
 	)
 	if err != nil {
@@ -221,6 +211,9 @@ func scanInto(sc scanner) (*Project, error) {
 	}
 	if assignedPort.Valid {
 		p.AssignedPort = int(assignedPort.Int64)
+	}
+	if devPort.Valid {
+		p.DevPort = int(devPort.Int64)
 	}
 	p.LastError = lastError.String
 	return &p, nil
