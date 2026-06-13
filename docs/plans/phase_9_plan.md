@@ -415,16 +415,28 @@ no `no-new-privileges`, no `/dev/fuse`, `MaskedPaths=[]`, loopback-only `4001` +
   <agent-server>/container/Dockerfile`, tag-pinned). `deploy/agent-server.service`
   is **deleted**. `bootstrap.sh` has no mode prompt; it always writes the
   container-mode `appx.env` and starts only `appx`.
-- **Secrets via the service env only** — `appx.service` reads
-  `EnvironmentFile=/etc/appx/appx.env` plus optional
+- **Secrets via the service env (for env-only creds); Settings UI for the rest.**
+  `appx.service` reads `EnvironmentFile=/etc/appx/appx.env` plus optional
   `EnvironmentFile=-/etc/appx/secrets.env`; systemd reads both **as root before
-  dropping to `User=appx`**, so `secrets.env` is `root:root 0600`. `bootstrap.sh`
-  prompts for `ANTHROPIC_API_KEY` with `read -rsp` (never echoed; only on a TTY)
-  and writes `0600`. appx forwards provider creds into the container **by name**
-  (`-e VAR`) via `APPX_AGENT_ENV_PASSTHROUGH` (always `ANTHROPIC_API_KEY`; extend
-  for `AWS_BEARER_TOKEN_BEDROCK,AWS_REGION`). Verified: `docker exec builder-outer
-  printenv ANTHROPIC_API_KEY` present; **0** occurrences of the key in
-  `journalctl -u appx`.
+  dropping to `User=appx`**, so `secrets.env` is `root:root 0600`. appx forwards
+  the names listed in `APPX_AGENT_ENV_PASSTHROUGH` into the container **by name**
+  (`-e VAR`), never on a command line / baked / logged. **Revised after review
+  (2026-06-13):** most providers — incl. Anthropic — are configured through the
+  agent's **Settings UI** like any other key (stored in the agent's Pi credential
+  storage, persisted in the `builder-workspace` volume), so `bootstrap.sh` no
+  longer prompts for `ANTHROPIC_API_KEY`. The service-env path is reserved for
+  creds the Settings UI can't carry (e.g. Bedrock's `AWS_BEARER_TOKEN_BEDROCK` +
+  `AWS_REGION`, the upstream Pi gap). Verified on the live box: both Bedrock vars
+  reachable via `docker exec printenv`, **0** secret values in `journalctl -u appx`.
+- **Dead-code cleanup (2026-06-13).** Now that deploy is fresh-install + container
+  only, removed the upgrade/legacy cruft: the stale host-mode artifact cleanup in
+  `system-setup.sh` and `tools-install.sh` (the `appx-agent` user, host
+  `agent-server`/`pi` removal), all `opencode` legacy cleanup (two generations
+  old) across the scripts + `Taskfile.yml` + `verify-installation.sh`, and the
+  orphaned `deploy/pi-version` file (nothing reads it; Pi is pinned by the
+  agent-server Dockerfile). `verify-installation.sh`'s secret-reachability check
+  was generalised from a hardcoded `ANTHROPIC_API_KEY` to whatever
+  `APPX_AGENT_ENV_PASSTHROUGH` lists.
 - **docker-group membership** — `system-setup.sh` adds `appx` to `docker`
   idempotently, with an inline comment that this is root-equivalent and Stage 5
   scopes it down. Confirmed inherited under `User=appx` after the reboot.

@@ -12,9 +12,12 @@ app data inside Docker volumes.
 | --------------------------------------------------- | ------------------------- | ---------- |
 | SQLite DB, TLS certs, initial password, agent token | `{data}/.appx-internals/` | `appx` only (0700) |
 
-Provider secrets are **not** stored in the data directory — they live in the
-service environment (`/etc/appx/appx.env` or `/etc/appx/secrets.env`, both
-`root:root 0600`) and are forwarded into the container by name.
+Provider credentials set via the **Settings UI** are stored in the agent's Pi
+credential storage **inside the container** (persisted in the `builder-workspace`
+volume), not in the host data directory. The exception is env-only credentials
+(e.g. Amazon Bedrock), supplied via the service environment
+(`/etc/appx/secrets.env`, `root:root 0600`) and forwarded into the container by
+name — never written to the data directory.
 
 **Inside Docker volumes** — created and owned by the daemon, mounted into the
 outer container:

@@ -139,7 +139,6 @@ expect_ok "env file sets APPX_AGENT_IMAGE"   grep -q '^APPX_AGENT_IMAGE=' "$ENV_
 expect_ok "env file sets APPX_AGENT_SECCOMP" grep -q '^APPX_AGENT_SECCOMP=' "$ENV_FILE"
 expect_ok "appx.service exists"          test -f /etc/systemd/system/appx.service
 expect_ok "appx service enabled"         systemctl is-enabled appx
-expect_deny "legacy opencode.service absent" test -f /etc/systemd/system/opencode.service
 expect_ok "appx.service orders after docker" \
   grep -q 'After=docker.service' /etc/systemd/system/appx.service
 expect_ok "appx.service Wants docker" \
@@ -173,7 +172,6 @@ EXPECTED_NODE_MAJOR="24"
 ACTUAL_NODE_MAJOR=$(/usr/local/bin/node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1 || echo "0")
 expect_eq "node major version is $EXPECTED_NODE_MAJOR" \
   "$ACTUAL_NODE_MAJOR" "$EXPECTED_NODE_MAJOR"
-expect_deny "legacy opencode binary absent" test -x /usr/local/bin/opencode
 expect_ok "docker available"                 command -v docker
 expect_ok "uv binary in /usr/local/bin"      test -x /usr/local/bin/uv
 
@@ -197,8 +195,6 @@ expect_ok "outer image '$APPX_AGENT_IMAGE' present" \
 echo ""
 echo "=== 8. Runtime (if appx is running) ==="
 # ---------------------------------------------------------------------------
-
-expect_deny "legacy opencode service inactive" systemctl is-active opencode
 
 if systemctl is-active --quiet appx 2>/dev/null; then
   expect_ok "appx is running"        systemctl is-active appx
@@ -230,18 +226,25 @@ if systemctl is-active --quiet appx 2>/dev/null; then
     expect_deny "publishes are loopback-only (never 0.0.0.0)" \
       bash -c "docker inspect -f '{{json .HostConfig.PortBindings}}' '$CONTAINER_NAME' | grep -q '\"0.0.0.0\"'"
 
-    # Secret reachability: the forwarded provider key is present in the
-    # container env (only when one was configured). Never print the value.
-    if [ -s "$SECRETS_FILE" ] || grep -q '^ANTHROPIC_API_KEY=' "$ENV_FILE" 2>/dev/null; then
-      expect_ok "provider secret reachable inside the container (ANTHROPIC_API_KEY set)" \
-        bash -c "docker exec '$CONTAINER_NAME' printenv ANTHROPIC_API_KEY >/dev/null 2>&1"
+    # Secret reachability: every name listed in APPX_AGENT_ENV_PASSTHROUGH should
+    # be present in the container env (these are the env-supplied creds, e.g.
+    # Bedrock). Most providers are set via the Settings UI instead and won't
+    # appear here. Never print the value.
+    PASSTHROUGH=$(grep -E '^APPX_AGENT_ENV_PASSTHROUGH=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+    if [ -n "$PASSTHROUGH" ]; then
+      IFS=',' read -ra _PT <<< "$PASSTHROUGH"
+      for _name in "${_PT[@]}"; do
+        _name=$(echo "$_name" | tr -d '[:space:]'); [ -z "$_name" ] && continue
+        expect_ok "env-supplied cred '$_name' reachable inside the container" \
+          bash -c "docker exec '$CONTAINER_NAME' printenv '$_name' >/dev/null 2>&1"
+      done
     else
-      echo "  INFO  no ANTHROPIC_API_KEY configured — skipping secret-reachability check"
+      echo "  INFO  APPX_AGENT_ENV_PASSTHROUGH unset — provider creds configured via the Settings UI (no env-reachability check)"
     fi
 
-    # Secrets must never land in the journal.
-    expect_deny "no ANTHROPIC_API_KEY value leaked into journalctl -u appx" \
-      bash -c "journalctl -u appx --no-pager 2>/dev/null | grep -qi 'sk-ant-'"
+    # Secrets must never land in the journal (Anthropic key shape + any forwarded value).
+    expect_deny "no provider key leaked into journalctl -u appx" \
+      bash -c "journalctl -u appx --no-pager 2>/dev/null | grep -qiE 'sk-ant-|sk-[A-Za-z0-9]{20,}'"
   else
     echo "  FAIL  outer container '$CONTAINER_NAME' not found while appx is active"; FAIL=$((FAIL + 1))
   fi

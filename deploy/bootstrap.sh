@@ -99,8 +99,10 @@ else
 #   APPX_AGENT_SECCOMP — absolute path to the tailored seccomp profile
 #                        (deploy installs /etc/appx/seccomp-builder.json)
 #   APPX_AGENT_ENV_PASSTHROUGH — comma-separated env var NAMES forwarded by name
-#                          into the container (provider secrets); the values come
-#                          from the service env (appx.env / secrets.env)
+#                          into the container, for creds that must come from the
+#                          service env rather than the Settings UI (e.g. Bedrock).
+#                          Most providers (incl. Anthropic) are configured in the
+#                          Settings UI instead.
 
 APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
@@ -113,56 +115,17 @@ APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 APPX_AGENT_CONTAINER=true
 APPX_AGENT_IMAGE=builder-outer
 APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json
-# Provider-secret env var NAMES forwarded by name into the container. The values
-# are supplied via the service env (appx.env below or /etc/appx/secrets.env).
-# ANTHROPIC_API_KEY is always forwarded; add Bedrock etc. here:
+# Provider credentials: configure them in the Settings UI (stored in the agent's
+# Pi credential storage, persisted in the builder-workspace volume) — this is the
+# path for Anthropic and most providers. ONLY creds that the Settings UI can't
+# carry (e.g. Amazon Bedrock's AWS_BEARER_TOKEN_BEDROCK, an upstream Pi gap) need
+# the env path: put them in /etc/appx/secrets.env (root:root 0600) and list the
+# var NAMES here so appx forwards them into the container by name (never baked):
 #   APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
 # APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
 EOF
   chmod 600 "$ENV_FILE"
   echo "wrote config → $ENV_FILE"
-fi
-
-echo ""
-
-# ---------------------------------------------------------------------------
-# 1b. Provider secret(s) → /etc/appx/secrets.env (root:root 0600).
-#
-# Secrets are supplied ONLY via the service environment, never on a command
-# line or baked into an image. systemd reads EnvironmentFile as root before
-# dropping to User=appx, so this file is root:root 0600 (appx never reads it
-# from disk — it arrives in the process env, then appx forwards it BY NAME into
-# the container via APPX_AGENT_ENV_PASSTHROUGH). Prompt only when the file is
-# absent and we're on an interactive TTY; otherwise leave it for the operator.
-# ---------------------------------------------------------------------------
-
-STEP="secrets"
-SECRETS_FILE="/etc/appx/secrets.env"
-if [ -f "$SECRETS_FILE" ]; then
-  echo "using existing secrets file: $SECRETS_FILE"
-  chown root:root "$SECRETS_FILE" 2>/dev/null || true
-  chmod 600 "$SECRETS_FILE" 2>/dev/null || true
-elif [ -t 0 ]; then
-  echo "=== Provider credentials ==="
-  echo "  Secrets reach the agent only via the service environment. ANTHROPIC_API_KEY"
-  echo "  is forwarded into the container by name. Leave blank to skip (configure later"
-  echo "  in $SECRETS_FILE, then: sudo systemctl restart appx)."
-  echo ""
-  # read -s: never echo the secret to the terminal.
-  read -rsp "ANTHROPIC_API_KEY (blank to skip): " INPUT_ANTHROPIC_KEY
-  echo ""
-  if [ -n "$INPUT_ANTHROPIC_KEY" ]; then
-    mkdir -p /etc/appx
-    ( umask 077; printf 'ANTHROPIC_API_KEY=%s\n' "$INPUT_ANTHROPIC_KEY" > "$SECRETS_FILE" )
-    chown root:root "$SECRETS_FILE"
-    chmod 600 "$SECRETS_FILE"
-    unset INPUT_ANTHROPIC_KEY
-    echo "wrote secret → $SECRETS_FILE (root:root 0600)"
-  else
-    echo "no secret entered — set provider creds later in $SECRETS_FILE or $ENV_FILE"
-  fi
-else
-  echo "non-interactive: skipping secret prompt — set provider creds in $SECRETS_FILE (root:root 0600) or $ENV_FILE"
 fi
 
 echo ""
@@ -234,7 +197,7 @@ STEP="restart-services"
 # container (which runs agent-server) at boot. There is no host
 # agent-server.service to start.
 echo "stopping services..."
-systemctl stop opencode appx 2>/dev/null || true
+systemctl stop appx 2>/dev/null || true
 sleep 2
 echo "starting appx (it will EnsureRunning the outer container)..."
 systemctl start appx

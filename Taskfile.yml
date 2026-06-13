@@ -72,7 +72,6 @@ tasks:
       - sudo install -m 750 -o root -g appx ./appx /usr/local/bin/appx
       - sudo ./deploy/tools-install.sh
       - sudo ./deploy/system-setup.sh
-      - sudo systemctl stop opencode 2>/dev/null || true
       - sudo systemctl restart appx
       - sudo ./deploy/verify-installation.sh
 

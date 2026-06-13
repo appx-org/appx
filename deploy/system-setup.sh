@@ -17,8 +17,7 @@
 #   3. Sets up directories with correct ownership and permissions
 #   4. Installs the tailored seccomp profile to /etc/appx/
 #   5. Adds appx to the docker group so the service can drive the daemon
-#   6. Removes any stale host-mode artifacts (appx-agent user, agent-server.service)
-#   7. Copies the appx systemd service file and enables it
+#   6. Copies the appx systemd service file and enables it
 #
 # What this script does NOT do:
 #   - Install Go, Node, Pi, agent-server, or the outer image (use tools-install.sh)
@@ -79,27 +78,6 @@ else
     echo "user appx already exists (updated shell and groups)"
   fi
 fi
-
-# ---------------------------------------------------------------------------
-# Remove stale host-mode artifacts (upgrade from a pre-Stage-4 install).
-# Host mode is gone: no appx-agent user, no /home/appx-agent, no
-# agent-server.service. Clean them up idempotently so nothing dangles.
-# ---------------------------------------------------------------------------
-
-if systemctl list-unit-files 2>/dev/null | grep -q '^agent-server.service'; then
-  systemctl disable --now agent-server 2>/dev/null || true
-fi
-rm -f /etc/systemd/system/agent-server.service
-if id -u appx-agent >/dev/null 2>&1; then
-  pkill -u appx-agent 2>/dev/null || true
-  sleep 1
-  userdel --remove appx-agent 2>/dev/null || userdel appx-agent 2>/dev/null || true
-  echo "removed stale host-mode user: appx-agent"
-fi
-if getent group appx-agent >/dev/null 2>&1; then
-  groupdel appx-agent 2>/dev/null || true
-fi
-rm -rf /home/appx-agent 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Directories
@@ -175,10 +153,6 @@ fi
 
 cp "$SCRIPT_DIR/appx.service" /etc/systemd/system/appx.service
 echo "copied appx.service"
-
-# Clean up legacy units.
-systemctl disable --now opencode 2>/dev/null || true
-rm -f /etc/systemd/system/opencode.service
 
 systemctl daemon-reload
 echo "systemd reloaded"

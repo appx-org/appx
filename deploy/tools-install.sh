@@ -123,24 +123,6 @@ fi
 # Follow the /usr/local/bin/node symlink back to the nvm versioned directory.
 NODE_BIN_DIR="$(dirname "$(readlink -f /usr/local/bin/node)")"
 
-# Remove the old agent backend package/shims if an earlier install left them behind.
-npm uninstall -g opencode-ai >/dev/null 2>&1 || true
-rm -f /usr/local/bin/opencode "$NODE_BIN_DIR/opencode"
-
-# ---------------------------------------------------------------------------
-# Remove stale host-mode agent backends (upgrade from a pre-Stage-4 install).
-# In container mode Pi + agent-server run INSIDE the outer image, never on the
-# host. Clean up any host install idempotently.
-# ---------------------------------------------------------------------------
-
-npm uninstall -g @earendil-works/pi-coding-agent >/dev/null 2>&1 || true
-rm -f /usr/local/bin/pi "$NODE_BIN_DIR/pi"
-if [ -x /usr/local/bin/agent-server ] || [ -x "$NODE_BIN_DIR/agent-server" ]; then
-  npm uninstall -g agent-server >/dev/null 2>&1 || true
-  rm -f /usr/local/bin/agent-server "$NODE_BIN_DIR/agent-server"
-  echo "removed stale host agent-server (it now runs inside the outer container)"
-fi
-
 # ---------------------------------------------------------------------------
 # Locate the agent-server checkout (used to build the outer image below).
 # ---------------------------------------------------------------------------

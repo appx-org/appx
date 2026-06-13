@@ -76,12 +76,11 @@ inside the container runs with `NODE_USE_ENV_PROXY=1` + `HTTPS_PROXY` pointed at
 appx's egress proxy on the docker bridge gateway, so provider traffic goes through
 the Appx egress allowlist.
 
-**Provider secrets are supplied only via the service environment.** bootstrap
-prompts (without echoing) for `ANTHROPIC_API_KEY` and writes it to
-`/etc/appx/secrets.env` (`root:root 0600`); appx forwards it **by name** into the
-container (never on a command line, never baked into the image, never logged).
-Other providers (e.g. Amazon Bedrock) are configured the same way — see
-[Known gotchas](#known-gotchas).
+**Provider credentials.** Configure them in the **Settings UI** after first
+login — Anthropic and most providers are stored in the agent's Pi credential
+storage (persisted in the `builder-workspace` volume), just like any other key.
+Only credentials the Settings UI can't carry (e.g. Amazon Bedrock — an upstream
+Pi gap) need the service-env path — see [Known gotchas](#known-gotchas).
 
 After bootstrap finishes, grab the generated password and log in:
 
@@ -90,8 +89,8 @@ sudo cat /var/lib/appx/.appx-internals/initial_password   # delete after saving
 ```
 
 Visit `https://<host>` (self-signed cert by default → browser warning; for a
-trusted cert see [Networking & TLS](./networking-and-tls.md)). Open Settings to
-configure models, then create a project.
+trusted cert see [Networking & TLS](./networking-and-tls.md)). Open **Settings**
+to configure your model-provider credentials and models, then create a project.
 
 ## Known gotchas
 
@@ -163,9 +162,10 @@ sudo ./deploy/verify-installation.sh
 
 Container-mode checks: the `appx` unit is active and ordered after docker, the
 outer container is healthy with the proven security flags + loopback-only
-publishes + `RestartPolicy=unless-stopped`, the provider secret is reachable
-inside the container, no secret leaked into the journal, and no host-mode
-artifacts remain. Exits 0 only if everything passes.
+publishes + `RestartPolicy=unless-stopped`, no secret leaked into the journal,
+and no host-mode artifacts remain (if a provider cred is supplied via the env
+path, it also checks that it's reachable inside the container). Exits 0 only if
+everything passes.
 
 ## Troubleshoot
 
