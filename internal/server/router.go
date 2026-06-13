@@ -97,7 +97,7 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	mux.Handle("/", spaHandler(fileServer, webFS))
 
 	// Build the dashboard handler (base domain requests).
-	dashboard := securityHeaders(mux, rcfg.HTTPMode)
+	dashboard := securityHeaders(mux, rcfg.HTTPMode, rcfg.BaseDomain)
 
 	// If no BaseDomain configured, skip subdomain dispatch.
 	if rcfg.BaseDomain == "" {
