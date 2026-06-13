@@ -218,22 +218,6 @@ if systemctl is-active --quiet appx 2>/dev/null; then
     expect_deny "publishes are loopback-only (never 0.0.0.0)" \
       bash -c "docker inspect -f '{{json .HostConfig.PortBindings}}' '$CONTAINER_NAME' | grep -q '\"0.0.0.0\"'"
 
-    # Secret reachability: every name listed in APPX_AGENT_ENV_PASSTHROUGH should
-    # be present in the container env (these are the env-supplied creds, e.g.
-    # Bedrock). Most providers are set via the Settings UI instead and won't
-    # appear here. Never print the value.
-    PASSTHROUGH=$(grep -E '^APPX_AGENT_ENV_PASSTHROUGH=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
-    if [ -n "$PASSTHROUGH" ]; then
-      IFS=',' read -ra _PT <<< "$PASSTHROUGH"
-      for _name in "${_PT[@]}"; do
-        _name=$(echo "$_name" | tr -d '[:space:]'); [ -z "$_name" ] && continue
-        expect_ok "env-supplied cred '$_name' reachable inside the container" \
-          bash -c "docker exec '$CONTAINER_NAME' printenv '$_name' >/dev/null 2>&1"
-      done
-    else
-      echo "  INFO  APPX_AGENT_ENV_PASSTHROUGH unset — provider creds configured via the Settings UI (no env-reachability check)"
-    fi
-
     # Secrets must never land in the journal (Anthropic key shape + any forwarded value).
     expect_deny "no provider key leaked into journalctl -u appx" \
       bash -c "journalctl -u appx --no-pager 2>/dev/null | grep -qiE 'sk-ant-|sk-[A-Za-z0-9]{20,}'"

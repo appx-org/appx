@@ -176,3 +176,4 @@ docker logs -f builder-outer     # agent-server (inside the outer container)
 | `deploy/appx.service`           | systemd unit     | `appx` unit (container mode; ordered after `docker.service`) |
 | `deploy/builder-container/`     | security boundary | seccomp profile installed to `/etc/appx/seccomp-builder.json` |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
+| `deploy/teardown.sh`            | Uninstall & cleanup | Reverse everything created by bootstrap.sh                        |
