@@ -122,7 +122,7 @@ APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json
 # the env path: put them in /etc/appx/secrets.env (root:root 0600) and list the
 # var NAMES here so appx forwards them into the container by name (never baked):
 #   APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
-# APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
+APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
 EOF
   chmod 600 "$ENV_FILE"
   echo "wrote config → $ENV_FILE"

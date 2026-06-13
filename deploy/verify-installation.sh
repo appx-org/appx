@@ -3,7 +3,7 @@
 #
 # Deploy is CONTAINER MODE ONLY (Stage 4): appx runs as the `appx` systemd
 # service and supervises the agent-server OUTER container. There is no host
-# appx-agent user, no agent-server.service, and no host Pi/agent-server install.
+# appx-agent user, no agent-server.service, and no host agent-server install.
 # This script verifies users, directories, permissions, tools, the systemd unit,
 # and (when running) the outer container's security boundary + secret wiring.
 #
@@ -80,7 +80,6 @@ expect_eq "appx home dir is data dir" \
 expect_deny "no host appx-agent user (host mode removed)"  id appx-agent
 expect_deny "no host agent-server.service"  test -f /etc/systemd/system/agent-server.service
 expect_deny "no host /home/appx-agent dir"  test -d /home/appx-agent
-expect_deny "no host pi binary"             test -x /usr/local/bin/pi
 expect_deny "no host agent-server binary"   test -x /usr/local/bin/agent-server
 
 # ---------------------------------------------------------------------------
@@ -173,13 +172,6 @@ ACTUAL_NODE_MAJOR=$(/usr/local/bin/node --version 2>/dev/null | sed 's/^v//' | c
 expect_eq "node major version is $EXPECTED_NODE_MAJOR" \
   "$ACTUAL_NODE_MAJOR" "$EXPECTED_NODE_MAJOR"
 expect_ok "docker available"                 command -v docker
-expect_ok "uv binary in /usr/local/bin"      test -x /usr/local/bin/uv
-
-if [ -x /usr/local/bin/claude ]; then
-  echo "  INFO  claude installed: $(/usr/local/bin/claude --version 2>/dev/null || echo 'unknown')"
-else
-  echo "  INFO  claude not installed (optional — terminal feature)"
-fi
 
 # ---------------------------------------------------------------------------
 echo ""

@@ -69,7 +69,7 @@ deploy/
   builder-container/           # tailored seccomp profile installed to /etc/appx/
   bootstrap.sh                 # Full install/update flow (container mode only)
   system-setup.sh              # appx user, projects group, dirs, seccomp, docker group, unit
-  tools-install.sh             # Go, Node.js, Claude Code, uv, + builds the outer image
+  tools-install.sh             # Go, Node.js, Task, + builds the outer image
 ```
 
 ## Tech Stack

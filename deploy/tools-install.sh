@@ -15,8 +15,6 @@
 #   - Go          (version pinned to go.mod — builds the appx binary)
 #   - Task        (taskfile.dev build runner — builds the appx binary)
 #   - Node.js 24  (via nvm, pinned to major version — builds the appx web UI)
-#   - Claude Code (Claude CLI for the terminal feature in user shells)
-#   - uv          (Python version/package manager for the terminal feature)
 #   - the outer builder image (built from the agent-server checkout, tag-pinned)
 #
 # Supported platforms: Ubuntu/Debian (amd64, arm64).
@@ -133,39 +131,6 @@ if [ -z "$AGENT_SERVER_DIR" ] && [ -d "$REPO_DIR/../agent-server" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Claude Code (self-update: sudo npm update -g @anthropic-ai/claude-code)
-# ---------------------------------------------------------------------------
-
-if command -v claude >/dev/null 2>&1; then
-  echo "claude already installed: $(claude --version 2>/dev/null || echo 'unknown')"
-else
-  echo "installing claude..."
-  npm install -g @anthropic-ai/claude-code
-  ln -sf "$NODE_BIN_DIR/claude" /usr/local/bin/claude
-  echo "claude installed"
-fi
-
-# ---------------------------------------------------------------------------
-# uv (self-update: uv self update)
-# ---------------------------------------------------------------------------
-
-if [ -x /usr/local/bin/uv ]; then
-  echo "uv already installed: $(/usr/local/bin/uv --version 2>/dev/null || echo 'unknown')"
-else
-  echo "installing uv..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  # Installer puts it in ~/.local/bin/ — copy to system path.
-  for candidate in \
-      /root/.local/bin/uv; do
-    if [ -x "$candidate" ]; then
-      install -m 755 "$candidate" /usr/local/bin/uv
-      echo "copied uv → /usr/local/bin/uv"
-      break
-    fi
-  done
-fi
-
-# ---------------------------------------------------------------------------
 # Outer builder image — build from the agent-server checkout, or pull a pinned
 # registry tag/digest. This is the only agent backend in container-mode deploy.
 # ---------------------------------------------------------------------------
@@ -206,6 +171,4 @@ echo ""
 echo "  task:     $(task --version 2>/dev/null || echo 'not found')"
 echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
-echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"
-echo "  claude:   $(claude --version 2>/dev/null || echo 'not found')"
 echo "  outer image ($APPX_AGENT_IMAGE): $("$RUNTIME" image inspect "$APPX_AGENT_IMAGE" >/dev/null 2>&1 && echo present || echo 'not found')"

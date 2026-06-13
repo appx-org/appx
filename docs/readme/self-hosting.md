@@ -15,8 +15,8 @@ Installed manually **before** bootstrap (bootstrap does not install these):
 - The sibling repos **`agent-server`** (the outer image is built from it) and **`agent-client`** (the web UI SDK) checked out **next to** `appx` under a common parent, and `agent-client`'s deps installed once.
 - **Open port 443** in the firewall / cloud security group.
 
-Everything else (Go, Node.js 24, Task, Claude Code, uv, and the `builder-outer`
-image) is installed/built automatically by bootstrap.
+Everything else (Go, Node.js 24, Task, and the `builder-outer` image) is
+installed/built automatically by bootstrap.
 
 ## Initial setup
 
@@ -55,7 +55,7 @@ On first run, bootstrap prompts for server configuration:
 ```
 Server hostname [138.x.x.x.sslip.io]:
 Data directory [/var/lib/appx]: /mnt/vol/appx-data
-Port [443]:
+Port [443]: # you must open chosen port in your server firewall
 ```
 
 Press Enter to accept defaults. The hostname defaults to `<your-ip>.sslip.io`
@@ -67,8 +67,8 @@ as the data directory.
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To
 change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
 
-Bootstrap then creates the `appx` OS user, installs tools (Go, Node.js, Claude
-Code, uv) and **builds the `builder-outer` image** from the sibling
+Bootstrap then creates the `appx` OS user, installs the build toolchain (Go,
+Node.js, Task) and **builds the `builder-outer` image** from the sibling
 `agent-server` checkout (its multi-stage Dockerfile compiles agent-server in a
 `node:22` stage, so the box needs docker + the source, not host Node), installs
 the `appx` systemd service, starts it, and runs a verification suite. agent-server
@@ -85,7 +85,7 @@ Pi gap) need the service-env path — see [Known gotchas](#known-gotchas).
 After bootstrap finishes, grab the generated password and log in:
 
 ```bash
-sudo cat /var/lib/appx/.appx-internals/initial_password   # delete after saving
+sudo cat {data directory path from bootstrap}/.appx-internals/initial_password   # delete after saving
 ```
 
 Visit `https://<host>` (self-signed cert by default → browser warning; for a
@@ -146,14 +146,6 @@ silently recreate a running container (it would kill running apps); recreate
 explicitly with `--recreate-agent-container` (or
 `APPX_RECREATE_AGENT_CONTAINER=true`), or the stop/rm/start sequence above.
 
-## Updating Claude Code
-
-```bash
-sudo npm install -g @anthropic-ai/claude-code
-```
-
-No service restart needed — it's a CLI tool.
-
 ## Verify installation
 
 ```bash
@@ -180,7 +172,7 @@ docker logs -f builder-outer     # agent-server (inside the outer container)
 | ------------------------------- | ---------------- | ---------------------------------------------------------- |
 | `deploy/bootstrap.sh`           | Day 1            | Full setup: user, dirs, tools, outer image, build, start, verify |
 | `deploy/system-setup.sh`        | Infra changes    | appx user, projects group, dirs, seccomp, docker group, unit |
-| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Claude Code, uv, + builds the outer image  |
+| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Task, + builds the outer image             |
 | `deploy/appx.service`           | systemd unit     | `appx` unit (container mode; ordered after `docker.service`) |
 | `deploy/builder-container/`     | security boundary | seccomp profile installed to `/etc/appx/seccomp-builder.json` |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
