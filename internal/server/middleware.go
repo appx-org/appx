@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -14,7 +15,21 @@ const maxRequestBody = 1 << 20 // 1 MB
 // every response. A strict CSP is applied to all routes. When httpMode is true
 // the Strict-Transport-Security header is omitted because the server is running
 // over plain HTTP (dev mode) and browsers must not be instructed to upgrade.
-func securityHeaders(next http.Handler, httpMode bool) http.Handler {
+//
+// baseDomain (when non-empty) enables the dashboard to embed agent-built apps,
+// which are served on `<project>.<baseDomain>` subdomains: it is added to the
+// CSP frame-src so the project view can preview a running app in an iframe.
+// Any port is allowed (`:*`) so the directive works in both dev (custom port)
+// and production (implicit 443).
+func securityHeaders(next http.Handler, httpMode bool, baseDomain string) http.Handler {
+	frameSrc := "'self'"
+	if baseDomain != "" {
+		scheme := "https"
+		if httpMode {
+			scheme = "http"
+		}
+		frameSrc = fmt.Sprintf("'self' %s://*.%s:*", scheme, baseDomain)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if !httpMode {
@@ -27,6 +42,7 @@ func securityHeaders(next http.Handler, httpMode bool) http.Handler {
 				"script-src 'self'; "+
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
+				"frame-src "+frameSrc+"; "+
 				"connect-src 'self'")
 		next.ServeHTTP(w, r)
 	})

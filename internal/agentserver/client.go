@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/neuromaxer/appx/internal/project"
 )
 
 // Project mirrors the agent-server ProjectInfo response shape.
@@ -44,11 +46,23 @@ func NewClient(baseURL, token string) *Client {
 	}
 }
 
-// EnsureProject creates a project with the given name, or returns the existing
-// one — the endpoint is idempotent on name, so this is safe to call on every
-// create and to re-run after an agent-server restart.
-func (c *Client) EnsureProject(ctx context.Context, name string) error {
-	body, err := json.Marshal(map[string]string{"name": name})
+// envTarget is the wire shape for one deployment environment. omitempty drops
+// unset fields so a partial registration stays compact.
+type envTarget struct {
+	Port int    `json:"port,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+
+// EnsureProject creates a project with the given name and pushes its dev+prod
+// deployment metadata, or updates the existing one — the endpoint is idempotent
+// on name, so this is safe to call on every create and to re-run after an
+// agent-server restart. Empty environments/fields are omitted from the payload.
+func (c *Client) EnsureProject(ctx context.Context, name string, dep project.Deployment) error {
+	payload := map[string]any{"name": name}
+	if deployment := marshalDeployment(dep); len(deployment) > 0 {
+		payload["deployment"] = deployment
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal create-project body: %w", err)
 	}
@@ -71,6 +85,27 @@ func (c *Client) EnsureProject(ctx context.Context, name string) error {
 	// (id/projectDir) is derivable on the appx side and not needed here.
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	return nil
+}
+
+// marshalDeployment converts the control-plane Deployment into the nested
+// `deployment` object, omitting empty environments so a partial or unset
+// registration produces no key at all.
+func marshalDeployment(dep project.Deployment) map[string]any {
+	deployment := map[string]any{}
+	if target := marshalTarget(dep.Dev); target != nil {
+		deployment["dev"] = target
+	}
+	if target := marshalTarget(dep.Prod); target != nil {
+		deployment["prod"] = target
+	}
+	return deployment
+}
+
+func marshalTarget(target project.EnvTarget) *envTarget {
+	if target.Port == 0 && target.URL == "" {
+		return nil
+	}
+	return &envTarget{Port: target.Port, URL: target.URL}
 }
 
 // DeleteProject removes a project (runtime, metadata, and on-disk dirs) from

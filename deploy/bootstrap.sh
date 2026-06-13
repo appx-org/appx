@@ -92,6 +92,17 @@ else
 #   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
 #   CLOUDFLARE_API_TOKEN — Cloudflare API token for DNS-01 challenge (optional)
+#   APPX_AGENT_CONTAINER — always "true": appx creates/supervises the
+#                          agent-server OUTER container (the only deploy mode)
+#   APPX_AGENT_IMAGE — outer image tag (built locally) or registry ref/digest to
+#                      pull
+#   APPX_AGENT_SECCOMP — absolute path to the tailored seccomp profile
+#                        (deploy installs /etc/appx/seccomp-builder.json)
+#   APPX_AGENT_ENV_PASSTHROUGH — comma-separated env var NAMES forwarded by name
+#                          into the container, for creds that must come from the
+#                          service env rather than the Settings UI (e.g. Bedrock).
+#                          Most providers (incl. Anthropic) are configured in the
+#                          Settings UI instead.
 
 APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
@@ -99,6 +110,19 @@ APPX_PORT=$APPX_PORT
 APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 # APPX_DOMAIN=
 # CLOUDFLARE_API_TOKEN=
+
+# --- Container mode (the only deploy path): appx manages the outer container ---
+APPX_AGENT_CONTAINER=true
+APPX_AGENT_IMAGE=builder-outer
+APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json
+# Provider credentials: configure them in the Settings UI (stored in the agent's
+# Pi credential storage, persisted in the builder-workspace volume) — this is the
+# path for Anthropic and most providers. ONLY creds that the Settings UI can't
+# carry (e.g. Amazon Bedrock's AWS_BEARER_TOKEN_BEDROCK, an upstream Pi gap) need
+# the env path: put them in /etc/appx/secrets.env (root:root 0600) and list the
+# var NAMES here so appx forwards them into the container by name (never baked):
+#   APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
+APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
 EOF
   chmod 600 "$ENV_FILE"
   echo "wrote config → $ENV_FILE"
@@ -116,7 +140,7 @@ STEP="system-setup"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 3. Install tools: node, Pi, agent-server, claude, uv.
+# 3. Install tools: build toolchain, terminal tools, + the outer image.
 # ---------------------------------------------------------------------------
 
 STEP="tools-install"
@@ -169,14 +193,17 @@ echo ""
 # ---------------------------------------------------------------------------
 
 STEP="restart-services"
+# Container mode is the only deploy path: appx creates/supervises the outer
+# container (which runs agent-server) at boot. There is no host
+# agent-server.service to start.
 echo "stopping services..."
-systemctl stop agent-server opencode appx 2>/dev/null || true
+systemctl stop appx 2>/dev/null || true
 sleep 2
-echo "starting services..."
-systemctl start agent-server appx
-echo "waiting for agent-server to be ready..."
-for i in $(seq 1 10); do
-  curl -sf http://127.0.0.1:4001/v1/healthz >/dev/null 2>&1 && break
+echo "starting appx (it will EnsureRunning the outer container)..."
+systemctl start appx
+echo "waiting for agent-server inside the container (published on 127.0.0.1:4001)..."
+for i in $(seq 1 60); do
+  curl -sf http://127.0.0.1:4001/ >/dev/null 2>&1 && break
   sleep 2
 done
 echo "services started"

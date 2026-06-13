@@ -32,6 +32,7 @@ const testSchema = `
 		name TEXT UNIQUE NOT NULL,
 		status TEXT DEFAULT 'stopped',
 		assigned_port INTEGER,
+		dev_port INTEGER,
 		last_error TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -804,6 +805,27 @@ func TestDashboardRouteHasStrictCSP(t *testing.T) {
 	if strings.Contains(csp, "worker-src") {
 		t.Errorf("unexpected worker-src in dashboard CSP: %q", csp)
 	}
+	// With no BaseDomain configured there are no app subdomains to embed, so
+	// frame-src stays locked to 'self'.
+	if !strings.Contains(csp, "frame-src 'self'") {
+		t.Errorf("expected frame-src directive in dashboard CSP, got %q", csp)
+	}
+}
+
+// TestDashboardCSPAllowsAppSubdomains verifies that when a BaseDomain is
+// configured, the dashboard CSP frame-src permits embedding agent-built apps
+// served on `<project>.<baseDomain>` subdomains. This is what lets the project
+// view preview a running app in an iframe.
+func TestDashboardCSPAllowsAppSubdomains(t *testing.T) {
+	h, _, _ := setupTestWithConfig(t, RouterConfig{HTTPMode: true, BaseDomain: "localhost"})
+	req := httptest.NewRequest("GET", "/api/projects", nil)
+	req.Host = "localhost" // base-domain host → dashboard
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	csp := rr.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self' http://*.localhost:*") {
+		t.Errorf("expected frame-src to allow app subdomains, got %q", csp)
+	}
 }
 
 // deadlineRecorder wraps httptest.ResponseRecorder and records whether
@@ -857,12 +879,12 @@ func TestAgentServerProxy_Authed_ForwardsRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"path":       r.URL.Path,
-			"query":      r.URL.RawQuery,
-			"method":     r.Method,
+			"path":   r.URL.Path,
+			"query":  r.URL.RawQuery,
+			"method": r.Method,
 			// agent-server resolves the project from its own registry; appx must
 			// not leak any internal project headers to it.
-			"projectId":  r.Header.Get(agentProjectIDHeader),
+			"projectId": r.Header.Get(agentProjectIDHeader),
 		})
 	}))
 	defer backend.Close()
