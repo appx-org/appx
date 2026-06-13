@@ -73,7 +73,7 @@ tasks:
       - sudo ./deploy/tools-install.sh
       - sudo ./deploy/system-setup.sh
       - sudo systemctl stop opencode 2>/dev/null || true
-      - sudo systemctl restart agent-server appx
+      - sudo systemctl restart appx
       - sudo ./deploy/verify-installation.sh
 
   server:verify:

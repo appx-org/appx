@@ -86,7 +86,7 @@ New `internal/containerruntime` package: small interface + docker-CLI implementa
 | 1 | Full user flow with agent-server **on host** | both |
 | 2 | agent-server inside the outer container, started manually | agent-server |
 | 3 | appx creates/supervises the outer container at startup | **appx** ✅ |
-| 4 | **Productionize**: deploy is container-mode only (host mode removed), appx as a systemd service, secrets, docker access, soak | **appx** |
+| 4 | **Productionize**: deploy is container-mode only (host mode removed), appx as a systemd service, secrets, docker access, soak | **appx** ✅ |
 | 5 | Hardening | both |
 
 ---
@@ -309,7 +309,7 @@ deployment machinery is removed.
 
 What's needed (none of it changes the Stage 3 container/security model):
 
-- [ ] **Strip host mode from deploy** — `system-setup.sh`: remove the `appx-agent`
+- [x] **Strip host mode from deploy** — `system-setup.sh`: remove the `appx-agent`
   user/group + `/home/appx-agent` dirs + the `agent-server.service` install/enable
   and the `APPX_AGENT_CONTAINER` branch (container is the only path); **delete**
   `deploy/agent-server.service`; disable+remove a stale `agent-server.service` on
@@ -320,10 +320,10 @@ What's needed (none of it changes the Stage 3 container/security model):
   improvement*). `bootstrap.sh`: no mode
   prompt; always write the container-mode `appx.env`; start only `appx`.
   `verify-installation.sh`: container-mode checks only.
-- [ ] **systemd ordering** — in `appx.service` directly (no host-mode unit to keep
+- [x] **systemd ordering** — in `appx.service` directly (no host-mode unit to keep
   clean now): `Wants=docker.service` + `After=docker.service network.target`. On
   reboot docker starts → appx's idempotent `EnsureRunning` re-attaches (no recreate).
-- [ ] **Container restart policy + supervision model** — add `--restart
+- [x] **Container restart policy + supervision model** — add `--restart
   unless-stopped` to `ContainerSpec.RunArgs` so the **Docker daemon** resurrects
   the outer container on crash *and* reboot, independent of appx. Closes a real
   Stage 3 gap: appx runs `EnsureRunning` **only at startup** (not a continuous
@@ -334,17 +334,17 @@ What's needed (none of it changes the Stage 3 container/security model):
   itself. A periodic re-`EnsureRunning`/health loop is a Stage 5 call (restart
   policy + the Stage 5 degraded banner may suffice). Verify it composes with the
   entrypoint's stale-`XDG_RUNTIME_DIR` wipe on a daemon-driven restart.
-- [ ] **Secrets to the service env** (appx forwards them by name into the
+- [x] **Secrets to the service env** (appx forwards them by name into the
   container; never baked): `ANTHROPIC_API_KEY` and/or `AWS_BEARER_TOKEN_BEDROCK` +
   `AWS_REGION` in `/etc/appx/appx.env` (0600) or an optional
   `EnvironmentFile=-/etc/appx/secrets.env` (`root:root 0600`), plus
   `APPX_AGENT_ENV_PASSTHROUGH` listing the extra names. `AGENT_SERVER_TOKEN` is
   auto-generated + persisted 0600 by appx (no manual step).
-- [ ] **appx.env** — always container mode: `APPX_AGENT_CONTAINER=true`,
+- [x] **appx.env** — always container mode: `APPX_AGENT_CONTAINER=true`,
   `APPX_AGENT_IMAGE=<pinned tag/digest>`,
   `APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json`. `system-setup.sh` installs
   the seccomp profile to `/etc/appx/` and sets up docker access for the appx user.
-- [ ] **`appx` service user → Docker access** — *runtime is decided + validated
+- [x] **`appx` service user → Docker access** — *runtime is decided + validated
   (SPIKE-FINDINGS T2): outer = **rootful host Docker**, inner = rootless podman —
   not open.* (rootless-docker-outer would reintroduce the nested subuid-exhaustion
   that killed rootless-podman-outer and break the rootful-bridge egress
@@ -354,17 +354,17 @@ What's needed (none of it changes the Stage 3 container/security model):
   Document the residual risk: docker-group is **root-equivalent**, mitigated by the
   dedicated single-purpose box + dedicated `appx` user. Scoping it tighter
   (docker-socket proxy / narrow sudoers) is **Stage 5 hardening**.
-- [ ] **443 without root** — already handled (`AmbientCapabilities=CAP_NET_BIND_SERVICE`
+- [x] **443 without root** — already handled (`AmbientCapabilities=CAP_NET_BIND_SERVICE`
   in `appx.service`); the manual `setcap` is only for hand-running the binary.
-- [ ] **start/restart semantics** — `Type=simple` (systemd doesn't wait on the
+- [x] **start/restart semantics** — `Type=simple` (systemd doesn't wait on the
   EnsureRunning health poll). On EnsureRunning failure appx `log.Fatal`s → exits →
   `Restart=on-failure`; pick a `RestartSec` large enough that a missing image /
   down daemon doesn't hot-loop. First boot: `tools-install.sh` builds/pulls the
   pinned image before `appx.service` starts.
-- [ ] **Docs** — `README`/`.env.example`: local dev = manual no-systemd flow
+- [x] **Docs** — `README`/`.env.example`: local dev = manual no-systemd flow
   (agent-server by hand + `appx --http` with `APPX_AGENT_SERVER_URL`); production
   = `bootstrap.sh` (container only).
-- [ ] **Soak**: reboot recovery, outer-container restart recovery, secrets reach
+- [x] **Soak**: reboot recovery, outer-container restart recovery, secrets reach
   the container, full UI e2e over public HTTPS.
 
 **Acceptance:** fresh box → `bootstrap.sh` → reboot → the `appx` systemd unit is
@@ -372,6 +372,170 @@ active, the outer container is healthy, and the full create → prompt → deplo
 promote flow works over the public HTTPS URL with provider creds supplied only
 via the service env. No `appx-agent` user, no `agent-server.service`, no host
 Node/Pi/agent-server on the box. Local dev still works by hand.
+
+---
+
+## Stage 4 — Results (productionize: appx as the systemd service, container-only deploy)
+
+**Date:** 2026-06-13
+**Status:** COMPLETE — on a fresh, disposable Ubuntu 26.04 / kernel 7.0 VM with
+rootful Docker 29.5.3: `go test ./...` green; `scripts/smoke-deploy.sh` **41/41**
+(now also asserting `RestartPolicy.Name == unless-stopped` and daemon-driven
+crash recovery); `sudo ./deploy/bootstrap.sh` → `verify-installation.sh` **61/61**;
+and a real **reboot** brought `docker.service` → `appx.service` → a healthy outer
+container back with **no manual step**. `docker inspect` on the appx-created
+container is byte-for-byte the Stage 3 boundary (`Privileged=false`, `CapAdd=[]`,
+no `no-new-privileges`, no `/dev/fuse`, `MaskedPaths=[]`, loopback-only `4001` +
+`10000-10199`) **plus** `RestartPolicy=unless-stopped`.
+
+### What landed
+
+- **Restart policy + supervision model (code)** — `ContainerSpec.RestartPolicy`
+  (defaulted to `unless-stopped` in `BuildSpec`) emits `--restart unless-stopped`
+  in `RunArgs`; unit-tested (`TestRunArgs_RestartPolicy`) and asserted in the
+  smoke via `docker inspect -f '{{.HostConfig.RestartPolicy.Name}}'`. The model,
+  now documented: **the Docker daemon keeps the container process alive**
+  (`--restart`, across crash + reboot); **appx ensures it exists / is correct /
+  is healthy at startup** (`EnsureRunning`, drift detection, health poll — it is
+  not a continuous watchdog); **`appx.service Restart=on-failure`** covers appx
+  itself. This closes the real Stage 3 gap (an outer crash *while appx kept
+  running* was not auto-healed).
+- **systemd unit** — `appx.service` gained `Wants=docker.service` +
+  `After=docker.service network.target` (egress auto-detect needs `docker0`,
+  i.e. the daemon up first), `Type=simple` (systemd must not block on the
+  EnsureRunning health poll), and `RestartSec=15` (a missing image / down daemon
+  backs off instead of hot-looping). Verified on the box: docker active **before**
+  appx active.
+- **Host mode stripped from deploy** — `system-setup.sh` now creates only the
+  `appx`/`projects` users, installs the seccomp profile, adds `appx` to the
+  `docker` group, and **idempotently removes** any stale `appx-agent` user,
+  `/home/appx-agent`, and `agent-server.service`. `tools-install.sh` drops the
+  host Pi/agent-server install (and removes stale ones) and **always builds the
+  outer image** from the agent-server checkout (`docker build -f
+  <agent-server>/container/Dockerfile`, tag-pinned). `deploy/agent-server.service`
+  is **deleted**. `bootstrap.sh` has no mode prompt; it always writes the
+  container-mode `appx.env` and starts only `appx`.
+- **Secrets via the service env only** — `appx.service` reads
+  `EnvironmentFile=/etc/appx/appx.env` plus optional
+  `EnvironmentFile=-/etc/appx/secrets.env`; systemd reads both **as root before
+  dropping to `User=appx`**, so `secrets.env` is `root:root 0600`. `bootstrap.sh`
+  prompts for `ANTHROPIC_API_KEY` with `read -rsp` (never echoed; only on a TTY)
+  and writes `0600`. appx forwards provider creds into the container **by name**
+  (`-e VAR`) via `APPX_AGENT_ENV_PASSTHROUGH` (always `ANTHROPIC_API_KEY`; extend
+  for `AWS_BEARER_TOKEN_BEDROCK,AWS_REGION`). Verified: `docker exec builder-outer
+  printenv ANTHROPIC_API_KEY` present; **0** occurrences of the key in
+  `journalctl -u appx`.
+- **docker-group membership** — `system-setup.sh` adds `appx` to `docker`
+  idempotently, with an inline comment that this is root-equivalent and Stage 5
+  scopes it down. Confirmed inherited under `User=appx` after the reboot.
+- **`verify-installation.sh`** — rewritten container-mode-only: unit active +
+  `Type=simple` + docker ordering + secrets-file perms, outer container running +
+  `GET /` healthy + the proven flags + loopback-only publishes + restart policy,
+  secret reachable via `docker exec printenv`, journal-leak check, and explicit
+  *absence* of every host-mode artifact.
+
+### Decisions (industry-standard option + why)
+
+- **systemd ordering → `Wants=` + `After=docker.service network.target`.** Standard
+  options were (a) a `Requires=` hard dependency (appx fails to start if docker is
+  down) or (b) a soft `Wants=` + `After=` ordering. Chose (b): appx should still
+  start and fail *loudly with a remediation hint* if docker is unavailable (its
+  `EnsureRunning` already classifies `ErrDaemonUnavailable`), rather than be
+  blocked by systemd dependency resolution; the `After=` guarantees correct boot
+  order without coupling lifecycles. `network.target` is the conventional ordering
+  anchor for a network service.
+- **Restart policy → `unless-stopped` (not `always`).** The two standard daemon
+  policies that survive reboot are `always` and `unless-stopped`. Chose
+  `unless-stopped` so that an operator who deliberately `docker stop`s the
+  container for maintenance is **respected** across a reboot (the daemon won't
+  resurrect a deliberately-stopped container), while genuine crashes + reboots are
+  still auto-healed. `Type=simple` + `Restart=on-failure`/`RestartSec=15` on the
+  appx unit is the standard pairing for a long-running service that does its own
+  readiness gating.
+- **Secrets-file layout → `EnvironmentFile` (root:root 0600), forwarded by name.**
+  The industry-standard for systemd secrets without a secrets manager is a
+  root-owned `EnvironmentFile` read before the privilege drop (alternatives:
+  `LoadCredential=`/`systemd-creds`, or a real secrets manager — heavier than this
+  single-box deploy warrants). appx then forwards the value into the container
+  **by name** (`docker -e VAR`, no `=value`) so it is never on a command line, in
+  the image, in `docker inspect`'s create args, or in the journal.
+- **docker-group call (already decided) + residual risk.** Outer = rootful host
+  Docker (spike T2); the unprivileged `appx` user reaches it via the `docker`
+  group. Residual risk stated honestly: docker-group is **root-equivalent**
+  (`docker run -v /:/host` owns the box), accepted on a dedicated single-purpose
+  box + dedicated `appx` user. Scoping it down (docker-socket proxy / narrow
+  sudoers) is Stage 5.
+
+### Deviations / findings
+
+- **`docker kill`/`docker stop` do NOT trigger an `unless-stopped` restart — by
+  design.** The first cut of the smoke's crash test used `docker kill` and failed:
+  on Docker 29.5.3, `docker kill`/`docker stop` set the container's **manual-stop
+  flag**, which `unless-stopped` deliberately honours (that is precisely the
+  difference from `always`), so the daemon leaves it `exited` — and even a daemon
+  reboot will not revive a manually-killed container. The smoke now simulates a
+  **genuine crash** by killing the container's *main process from the host*
+  (`kill -9 <State.Pid>`), which the daemon sees as a process death and restarts
+  per policy (`RestartCount` advances, agent-server healthy again — the entrypoint
+  XDG_RUNTIME_DIR wipe composes with the daemon-driven restart). On the live
+  systemd box this was confirmed end-to-end, and the **reboot path** (daemon
+  restarts running, not-manually-stopped containers on start) was confirmed by an
+  actual VM reboot. The host-side crash test needs root, so it degrades to
+  `[observe]` without passwordless sudo (CI keeps the deterministic
+  `RestartPolicy.Name` inspect assertion regardless).
+- **Inner apps did NOT auto-resume after an outer restart (agent-server gap; short-term
+  fix landed).** The outer image's `entrypoint.sh` wiped stale `XDG_RUNTIME_DIR`
+  but did **not** `podman start --all`, so after a crash/recreate/reboot the inner
+  DEV + PROD containers came back `Created` and the user's deployed apps stayed
+  **down** until the next redeploy (the daemon revives the *outer* container; it
+  knows nothing about the *inner* podman containers). This is agent-server's
+  domain (it owns the image). A **short-term fix** was added to
+  `agent-server/container/entrypoint.sh` — `podman start --all` (fail-soft) after
+  the wipe + warmup — and validated on the live box (both apps auto-resume after a
+  full recreate and a `kill -9` crash). The principled replacement (registry-driven
+  reconciliation + DEV/PROD intent, instead of the blunt `--all`) and the
+  `appRunning` HTTP-probe health fix remain **Stage 5** items.
+- **`task` is not in the cloudsmith apt repo for Ubuntu 26.04 (resolute).**
+  `tools-install.sh`'s `apt-get install -y task` fails on this OS (pre-existing,
+  unrelated to Stage 4). Worked around on the VM by pre-installing `task` via its
+  official install script (the idempotent `command -v task` check then
+  short-circuits). Not changed in the script — the prod box is Ubuntu 24.04 where
+  the apt repo works; recorded as an environment note.
+- **The appx web build needs the sibling `agent-client` deps installed once**
+  (`cd ../agent-client && npm install`) — a documented local-dev prerequisite, but
+  `bootstrap.sh`'s build step surfaces it as a TypeScript error if skipped. Not a
+  Stage 4 regression; noted so a fresh-box operator runs it before bootstrap.
+- **`deploy/pi-version` is now orphaned.** Host Pi is no longer installed (Pi runs
+  inside the outer image, pinned by the agent-server Dockerfile), so nothing reads
+  `deploy/pi-version` anymore. Left in place to avoid scope creep; a doc-only
+  cleanup can remove it later.
+- **Full LLM-in-the-loop UI e2e (create→prompt→deploy→promote) remains a manual,
+  pre-release step** — it needs a real provider key + a browser, so it is not part
+  of the deterministic gate (same stance as Stage 3). Everything verifiable
+  headlessly (HTTPS edge 200, auth 401, subdomain proxy routing, secret
+  reachability, reboot + crash recovery) is automated.
+
+### Verification on this VM
+
+1. `go test ./...` green (incl. `TestRunArgs_RestartPolicy`).
+2. `scripts/smoke-deploy.sh` **41/41** (adds the restart-policy inspect assertion
+   + the genuine-crash daemon-recovery check).
+3. `sudo ./deploy/bootstrap.sh` on a fresh box → creates the `appx` user, installs
+   + enables the unit, builds the outer image from the checkout, starts the
+   service → `verify-installation.sh` **61/61**.
+4. `docker inspect builder-outer`: Stage 3 boundary unchanged **+**
+   `RestartPolicy=unless-stopped`; publishes loopback-only.
+5. **Reboot** → docker active before appx; appx logged `already running` →
+   `healthy` (re-attach, **no** recreate, `RestartCount=0`); secret still
+   reachable; **0** secret occurrences in the post-boot journal.
+6. Genuine crash (`kill -9` the container's host PID) → daemon restarted it
+   (`RestartCount=1`), agent-server healthy again.
+7. Public HTTPS edge: dashboard `200`, unknown-subdomain `404`, bad-password login
+   `401`; appx bound `:443` as the **non-root** `appx` user (CAP_NET_BIND_SERVICE).
+8. No `appx-agent` user, no `agent-server.service`, no `/home/appx-agent`, no host
+   `pi`/`agent-server` binaries.
+
+---
 
 ## Stage 5 — Hardening (appx items)
 

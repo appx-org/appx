@@ -92,12 +92,15 @@ else
 #   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)
 #   CLOUDFLARE_API_TOKEN — Cloudflare API token for DNS-01 challenge (optional)
-#   APPX_AGENT_CONTAINER — "true" makes appx create/supervise the agent-server
-#                          OUTER container itself (Stage 3). Default host mode.
+#   APPX_AGENT_CONTAINER — always "true": appx creates/supervises the
+#                          agent-server OUTER container (the only deploy mode)
 #   APPX_AGENT_IMAGE — outer image tag (built locally) or registry ref/digest to
-#                      pull (container mode; default "builder-outer")
+#                      pull
 #   APPX_AGENT_SECCOMP — absolute path to the tailored seccomp profile
-#                        (container mode; deploy installs /etc/appx/seccomp-builder.json)
+#                        (deploy installs /etc/appx/seccomp-builder.json)
+#   APPX_AGENT_ENV_PASSTHROUGH — comma-separated env var NAMES forwarded by name
+#                          into the container (provider secrets); the values come
+#                          from the service env (appx.env / secrets.env)
 
 APPX_HOST=$APPX_HOST
 APPX_DATA=$APPX_DATA
@@ -105,13 +108,61 @@ APPX_PORT=$APPX_PORT
 APPX_AGENT_SERVER_URL=http://127.0.0.1:4001
 # APPX_DOMAIN=
 # CLOUDFLARE_API_TOKEN=
-# --- Container mode (Stage 3): uncomment to have appx manage the outer container ---
-# APPX_AGENT_CONTAINER=true
-# APPX_AGENT_IMAGE=builder-outer
-# APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json
+
+# --- Container mode (the only deploy path): appx manages the outer container ---
+APPX_AGENT_CONTAINER=true
+APPX_AGENT_IMAGE=builder-outer
+APPX_AGENT_SECCOMP=/etc/appx/seccomp-builder.json
+# Provider-secret env var NAMES forwarded by name into the container. The values
+# are supplied via the service env (appx.env below or /etc/appx/secrets.env).
+# ANTHROPIC_API_KEY is always forwarded; add Bedrock etc. here:
+#   APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
+# APPX_AGENT_ENV_PASSTHROUGH=AWS_BEARER_TOKEN_BEDROCK,AWS_REGION
 EOF
   chmod 600 "$ENV_FILE"
   echo "wrote config → $ENV_FILE"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# 1b. Provider secret(s) → /etc/appx/secrets.env (root:root 0600).
+#
+# Secrets are supplied ONLY via the service environment, never on a command
+# line or baked into an image. systemd reads EnvironmentFile as root before
+# dropping to User=appx, so this file is root:root 0600 (appx never reads it
+# from disk — it arrives in the process env, then appx forwards it BY NAME into
+# the container via APPX_AGENT_ENV_PASSTHROUGH). Prompt only when the file is
+# absent and we're on an interactive TTY; otherwise leave it for the operator.
+# ---------------------------------------------------------------------------
+
+STEP="secrets"
+SECRETS_FILE="/etc/appx/secrets.env"
+if [ -f "$SECRETS_FILE" ]; then
+  echo "using existing secrets file: $SECRETS_FILE"
+  chown root:root "$SECRETS_FILE" 2>/dev/null || true
+  chmod 600 "$SECRETS_FILE" 2>/dev/null || true
+elif [ -t 0 ]; then
+  echo "=== Provider credentials ==="
+  echo "  Secrets reach the agent only via the service environment. ANTHROPIC_API_KEY"
+  echo "  is forwarded into the container by name. Leave blank to skip (configure later"
+  echo "  in $SECRETS_FILE, then: sudo systemctl restart appx)."
+  echo ""
+  # read -s: never echo the secret to the terminal.
+  read -rsp "ANTHROPIC_API_KEY (blank to skip): " INPUT_ANTHROPIC_KEY
+  echo ""
+  if [ -n "$INPUT_ANTHROPIC_KEY" ]; then
+    mkdir -p /etc/appx
+    ( umask 077; printf 'ANTHROPIC_API_KEY=%s\n' "$INPUT_ANTHROPIC_KEY" > "$SECRETS_FILE" )
+    chown root:root "$SECRETS_FILE"
+    chmod 600 "$SECRETS_FILE"
+    unset INPUT_ANTHROPIC_KEY
+    echo "wrote secret → $SECRETS_FILE (root:root 0600)"
+  else
+    echo "no secret entered — set provider creds later in $SECRETS_FILE or $ENV_FILE"
+  fi
+else
+  echo "non-interactive: skipping secret prompt — set provider creds in $SECRETS_FILE (root:root 0600) or $ENV_FILE"
 fi
 
 echo ""
@@ -126,7 +177,7 @@ STEP="system-setup"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 3. Install tools: node, Pi, agent-server, claude, uv.
+# 3. Install tools: build toolchain, terminal tools, + the outer image.
 # ---------------------------------------------------------------------------
 
 STEP="tools-install"
@@ -179,26 +230,16 @@ echo ""
 # ---------------------------------------------------------------------------
 
 STEP="restart-services"
-# Detect container mode from the env file (agent-server runs inside the
-# appx-managed container, so there is no host agent-server.service to start).
-APPX_AGENT_CONTAINER_VAL=$(grep '^APPX_AGENT_CONTAINER=' "$ENV_FILE" | cut -d= -f2- || true)
-case "$(echo "${APPX_AGENT_CONTAINER_VAL}" | tr '[:upper:]' '[:lower:]')" in
-  1|true|yes|on) CONTAINER_MODE=true ;;
-  *) CONTAINER_MODE=false ;;
-esac
-
+# Container mode is the only deploy path: appx creates/supervises the outer
+# container (which runs agent-server) at boot. There is no host
+# agent-server.service to start.
 echo "stopping services..."
-systemctl stop agent-server opencode appx 2>/dev/null || true
+systemctl stop opencode appx 2>/dev/null || true
 sleep 2
-echo "starting services..."
-if [ "$CONTAINER_MODE" = "true" ]; then
-  # appx creates/supervises the outer container (which runs agent-server) at boot.
-  systemctl start appx
-else
-  systemctl start agent-server appx
-fi
-echo "waiting for agent-server to be ready (published on 127.0.0.1:4001)..."
-for i in $(seq 1 30); do
+echo "starting appx (it will EnsureRunning the outer container)..."
+systemctl start appx
+echo "waiting for agent-server inside the container (published on 127.0.0.1:4001)..."
+for i in $(seq 1 60); do
   curl -sf http://127.0.0.1:4001/ >/dev/null 2>&1 && break
   sleep 2
 done

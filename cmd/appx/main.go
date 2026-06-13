@@ -390,7 +390,7 @@ func ensureOuterContainer(agentServerURL, token, egressBindHost, hostGateway, in
 		log.Fatalf("container mode: %v", drift)
 	case errors.Is(err, containerruntime.ErrDaemonUnavailable):
 		log.Fatalf("container mode: container runtime unavailable: %v\n"+
-			"  remediation: install docker (or podman) and ensure the appx user can invoke it (rootless docker / host podman preferred), then restart appx", err)
+			"  remediation: ensure rootful Docker is running and the appx user is in the 'docker' group (deploy/system-setup.sh wires this; needs a re-login/service restart to take effect), then restart appx", err)
 	case errors.Is(err, containerruntime.ErrImageMissing):
 		log.Fatalf("container mode: %v\n"+
 			"  remediation: build or pull the outer image (deploy/tools-install.sh), or set APPX_AGENT_IMAGE to an available tag/digest", err)

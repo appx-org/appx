@@ -107,6 +107,7 @@ func TestRunArgs_VerbatimSecurityFlagSet(t *testing.T) {
 		"-e HTTPS_PROXY=http://host.docker.internal:9080",
 		"-e NODE_USE_ENV_PROXY=1",
 		"-e NO_PROXY=localhost,127.0.0.1",
+		"--restart unless-stopped",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(joined, want) {
@@ -138,8 +139,7 @@ func TestRunArgs_VerbatimSecurityFlagSet(t *testing.T) {
 	}
 }
 
-func TestRunArgs_OptionalLimits(t *testing.T) {
-	spec := testSpec()
+func TestRunArgs_OptionalLimits(t *testing.T) {	spec := testSpec()
 	spec.Memory = "2g"
 	spec.CPUs = "2.0"
 	joined := strings.Join(spec.RunArgs(), " ")
@@ -153,6 +153,20 @@ func TestRunArgs_OptionalLimits(t *testing.T) {
 	// Default spec must NOT emit empty limits.
 	if strings.Contains(strings.Join(testSpec().RunArgs(), " "), "--memory") {
 		t.Error("default spec should not include --memory")
+	}
+}
+
+// TestRunArgs_RestartPolicy asserts the daemon-driven restart policy is in the
+// arg vector (Stage 4: the daemon keeps the outer container alive across crash +
+// reboot, independent of appx). Default is unless-stopped; empty emits nothing.
+func TestRunArgs_RestartPolicy(t *testing.T) {
+	if !strings.Contains(strings.Join(testSpec().RunArgs(), " "), "--restart unless-stopped") {
+		t.Error("default spec should include --restart unless-stopped")
+	}
+	spec := testSpec()
+	spec.RestartPolicy = ""
+	if strings.Contains(strings.Join(spec.RunArgs(), " "), "--restart") {
+		t.Error("empty RestartPolicy must not emit --restart")
 	}
 }
 

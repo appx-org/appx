@@ -218,6 +218,8 @@ check "the two publishes are present (4001 + 10000-10199)" \
 	         && docker inspect -f '{{json .HostConfig.PortBindings}}' $NAME | grep -q '10199/tcp'"
 check "publishes are loopback-only (127.0.0.1, never 0.0.0.0)" \
 	bash -c "! docker inspect -f '{{json .HostConfig.PortBindings}}' $NAME | grep -q '\"0.0.0.0\"'"
+check "restart policy is unless-stopped (daemon keeps the container alive on crash + reboot)" \
+	bash -c "[ \"\$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $NAME)\" = 'unless-stopped' ]"
 
 # ── 4. login + create project through appx ────────────────────────────────────
 
@@ -321,6 +323,30 @@ print(p[0].get("appRunning") if p else "missing")
 ' "$PROJECT" 2>/dev/null || echo "error")"
 echo "  [observe] appx appRunning after restart: ${appx_app_running} (docker-proxy keeps the loopback port connectable — see FINDING)"
 
+# ── 10b. daemon-driven crash recovery: kill the container's process, daemon restarts ──
+
+echo "[10b] crash the outer container → Docker daemon (--restart unless-stopped) brings it back"
+# IMPORTANT FINDING: `docker kill`/`docker stop` set a MANUAL-STOP flag that the
+# `unless-stopped` policy deliberately honours (that is the difference vs
+# `always`) — so they do NOT trigger a restart, and even a daemon reboot will not
+# revive a docker-killed container. To simulate a GENUINE crash we kill the
+# container's main process from the HOST (a process death, not a docker API
+# stop), which the daemon does restart per policy. The reboot path is proven
+# separately by the systemd soak (plan Stage 4 Soak). Needs host root; without
+# passwordless sudo this degrades to [observe] so the gate stays runnable in CI.
+if sudo -n true 2>/dev/null; then
+	CRASH_PID="$(docker inspect -f '{{.State.Pid}}' "$NAME" 2>/dev/null)"
+	RC_BEFORE="$(docker inspect -f '{{.RestartCount}}' "$NAME" 2>/dev/null)"
+	sudo kill -9 "$CRASH_PID" 2>/dev/null || true
+	check "daemon restarted the container after a genuine crash (RestartCount advanced, Running=true)" \
+		bash -c "for _ in \$(seq 1 40); do [ \"\$(docker inspect -f '{{.State.Running}}' $NAME 2>/dev/null)\" = 'true' ] \
+			&& [ \"\$(docker inspect -f '{{.RestartCount}}' $NAME 2>/dev/null)\" != '$RC_BEFORE' ] && exit 0; sleep 1; done; exit 1"
+	check "agent-server healthy again after daemon-driven restart (entrypoint XDG_RUNTIME_DIR wipe composed)" \
+		bash -c "for _ in \$(seq 1 30); do curl -fsS http://127.0.0.1:4001/ >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1"
+else
+	echo "  [observe] no passwordless sudo — skipping host-side crash test; restart policy presence is asserted in [3], reboot recovery in the systemd soak"
+fi
+
 # ── 11. appx restart recovers cleanly (idempotent EnsureRunning) ──────────────
 
 echo "[11] appx restart recovers cleanly (EnsureRunning is idempotent)"
@@ -344,8 +370,8 @@ echo
 echo "──────────────────────────────────────────"
 echo "smoke-deploy result: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 if [ "$FAIL_COUNT" -eq 0 ]; then
-	echo "STAGE 3 SMOKE-DEPLOY: PASS"
+	echo "STAGE 3/4 SMOKE-DEPLOY: PASS"
 	exit 0
 fi
-echo "STAGE 3 SMOKE-DEPLOY: FAIL"
+echo "STAGE 3/4 SMOKE-DEPLOY: FAIL"
 exit 1

@@ -65,21 +65,21 @@ web/src/
   pages/Project.tsx            # Agent and terminal tabs
   pages/Settings.tsx           # Pi credentials, subscriptions, custom providers
 deploy/
-  appx.service                 # systemd unit for appx
-  agent-server.service         # systemd unit for Pi agent-server
-  bootstrap.sh                 # Full install/update flow
-  system-setup.sh              # Users, directories, services
-  tools-install.sh             # Go, Node.js, Pi, agent-server, Claude Code, uv
+  appx.service                 # systemd unit for appx (container mode; ordered after docker.service)
+  builder-container/           # tailored seccomp profile installed to /etc/appx/
+  bootstrap.sh                 # Full install/update flow (container mode only)
+  system-setup.sh              # appx user, projects group, dirs, seccomp, docker group, unit
+  tools-install.sh             # Go, Node.js, Claude Code, uv, + builds the outer image
 ```
 
 ## Tech Stack
 
 - Backend: Go 1.26, stdlib `net/http`, `database/sql` with `modernc.org/sqlite`.
 - Frontend: React 19, Vite 8, TypeScript 5.9, react-router-dom 7.
-- Agent runtime: Pi CLI plus Appx org `agent-server`.
+- Agent runtime: Pi CLI plus Appx org `agent-server`, run inside the appx-managed outer container (production); run by hand for local dev.
 - Streaming: Appx frontend consumes the agent-server HTTP/SSE session contract.
 - Markdown: `marked` + `dompurify`.
-- Deployment: Task, systemd, two OS users (`appx` and `appx-agent`) sharing the `projects` group.
+- Deployment: Task, systemd. **Container-mode only:** appx runs as the `appx` OS user (in the `projects` + `docker` groups) and supervises the agent-server outer container; the agent runs as an unprivileged uid *inside* that container, so there is no `appx-agent` host user.
 
 ## Conventions
 
@@ -120,11 +120,12 @@ Add or update tests when behavior changes, especially for server routes, databas
 
 ## Deployment Notes
 
-- `deploy/bootstrap.sh` is first-run setup.
-- `task server:deploy` pulls, rebuilds, installs, restarts `agent-server` and `appx`, then verifies.
-- The active agent service user is `appx-agent`.
-- Pi credentials live under the agent service user's Pi storage and are managed through Settings.
-- Provider traffic from Pi goes through the Appx egress proxy; loopback traffic to agent-server stays local.
+- `deploy/bootstrap.sh` is first-run setup (container mode only: appx as the `appx` systemd service supervising the agent-server outer container).
+- `task server:deploy` pulls, rebuilds, installs, rebuilds the outer image, restarts `appx`, then verifies.
+- The agent (agent-server + Pi) runs as an unprivileged uid **inside** the outer container, not as a host user; provider secrets reach it via the service env (`/etc/appx/secrets.env`, `root:root 0600`), forwarded into the container by name.
+- The Docker daemon (`--restart unless-stopped`) keeps the outer container alive across crash + reboot; appx's startup `EnsureRunning` re-attaches idempotently (never auto-recreates on drift). `appx.service` is ordered `After=docker.service`.
+- `appx` is in the `docker` group (root-equivalent — accepted on a dedicated box; Stage 5 scopes it down). It binds 443 via `CAP_NET_BIND_SERVICE`, not root.
+- Provider traffic from Pi goes through the Appx egress proxy (bridge gateway in container mode); loopback traffic to agent-server stays local.
 - The HSTS header includes `includeSubDomains`. Do not point appx at a shared domain that also hosts HTTP services on subdomains.
 
 ## Documentation

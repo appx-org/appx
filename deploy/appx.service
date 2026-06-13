@@ -1,9 +1,18 @@
 [Unit]
 Description=Appx — Agentic Application Proxy
 Documentation=https://github.com/neuromaxer/appx
-After=network.target
+# Appx runs in container mode: it creates/supervises the agent-server OUTER
+# container via the Docker daemon, and its egress proxy binds the docker bridge
+# gateway (auto-detected from `docker network inspect bridge`), which needs
+# docker0 to exist. So the daemon must be up first.
+Wants=docker.service
+After=docker.service network.target
 
 [Service]
+# Container mode is the only deploy path (Stage 4): there is no host
+# agent-server.service. appx supervises the outer container itself.
+Type=simple
+
 User=appx
 Group=appx
 
@@ -17,13 +26,28 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 UMask=0007
 
 # Server-specific config lives in /etc/appx/appx.env (created by bootstrap).
-# The env file sets APPX_DATA, APPX_HOST, APPX_PORT, etc.
+# The env file sets APPX_DATA, APPX_HOST, APPX_PORT, the container-mode keys
+# (APPX_AGENT_CONTAINER, APPX_AGENT_IMAGE, APPX_AGENT_SECCOMP), and may carry
+# provider secrets (ANTHROPIC_API_KEY / AWS_BEARER_TOKEN_BEDROCK ...).
 EnvironmentFile=/etc/appx/appx.env
+# Optional secrets-only file. systemd reads EnvironmentFile as root BEFORE
+# dropping to User=appx, so this can (and should) be root:root 0600 — appx never
+# needs to read it from disk; it arrives in the process env. The leading '-'
+# makes it optional (secrets may instead live in appx.env). Secrets are
+# forwarded into the container BY NAME (docker -e VAR) via
+# APPX_AGENT_ENV_PASSTHROUGH; they are never on a command line or baked.
+EnvironmentFile=-/etc/appx/secrets.env
 
 ExecStart=/usr/local/bin/appx
 
+# appx log.Fatal's (exits non-zero) when EnsureRunning fails — a missing image,
+# a down daemon, or an unhealthy container. RestartSec is deliberately large so
+# a persistent failure (image not built, daemon down) backs off instead of
+# hot-looping. Type=simple means systemd does NOT block on the EnsureRunning
+# health poll; the Docker daemon's --restart unless-stopped keeps the outer
+# container alive across crashes/reboots independent of appx.
 Restart=on-failure
-RestartSec=5
+RestartSec=15
 
 StandardOutput=journal
 StandardError=journal

@@ -1,6 +1,6 @@
 # Appx
 
-Agentic Application Proxy — self-hostable tool to build and host personal apps with AI agents powered by Pi.
+Agentic Application Proxy — a self-hostable tool to build and host personal apps with AI agents powered by Pi.
 
 ## What it does
 
@@ -18,298 +18,29 @@ Browser
         └── <project>.<domain>   Reverse proxy → agent-built apps
 ```
 
-Appx itself is a single Go binary. The React frontend is compiled and embedded
-at build time. State lives in a SQLite database on disk.
+Appx itself is a single Go binary; the React frontend is compiled and embedded at build time, and state lives in a SQLite database on disk.
 
-Pi is installed as the default agent runtime. systemd runs `agent-server` on
-`localhost:4001`; agent-server owns project identity, directories, and sessions
-while sharing one set of Pi credentials, and Appx proxies session traffic to it.
+Pi is the agent runtime. In production appx runs as the `appx` systemd service and supervises an **outer container** that holds agent-server + Pi + rootless podman; agent-server (published on loopback `127.0.0.1:4001`) owns project identity, directories, and sessions while sharing one set of Pi credentials, and Appx proxies session traffic to it. In local dev agent-server is run by hand and appx points at it via `APPX_AGENT_SERVER_URL` (no systemd, no container).
 
-**Auth model**: single user, password login, session cookie. On first run a random password is generated and printed to stdout.
+**Auth model**: single user, password login, session cookie. On first run a random password is generated and written to `{data-dir}/.appx-internals/initial_password`.
 
-**TLS**: self-signed ECDSA P-256 certificate auto-generated on first run, auto-renewed 7 days before expiry. For production, use `-domain` with `CLOUDFLARE_API_TOKEN` for Let's Encrypt certificates.
+**TLS**: self-signed ECDSA P-256 certificate auto-generated on first run, auto-renewed 7 days before expiry. For production, use `APPX_DOMAIN` + `CLOUDFLARE_API_TOKEN` for Let's Encrypt.
 
-## Prerequisites
+## Documentation
 
-- Linux host (Ubuntu/Debian, amd64 or arm64)
-- `git` — installed manually before bootstrap
-- Go, Node.js, Task, and all agent tools — installed automatically by bootstrap
+- **[Self-Hosting](docs/readme/self-hosting.md)** — prerequisites, the from-scratch install, provider secrets, updating, verification, troubleshooting, and known gotchas (incl. Amazon Bedrock).
+- **[Networking & TLS](docs/readme/networking-and-tls.md)** — subdomain routing via sslip.io and automatic Let's Encrypt certificates.
+- **[Storage & Isolation](docs/readme/storage-and-isolation.md)** — where state lives (host data dir + Docker volumes), what survives a container restart, the user/isolation model, and caveats.
+- **[Local Development](docs/readme/local-development.md)** — the no-systemd, no-container dev flow (run agent-server by hand + `appx --http`).
+- **[CLAUDE.md](CLAUDE.md)** — architecture details and development conventions.
 
-## Self-Hosting
+## Prerequisites (production)
 
-### Private repo: deploy key setup
-
-If the repo is private, set up a read-only deploy key on the server before cloning. This is a one-time step.
+A Linux host (Ubuntu 24.04 LTS recommended), `git`, **rootful Docker**, and the sibling `agent-server` + `agent-client` repos checked out next to `appx`. Then:
 
 ```bash
-# Generate a deploy key (no passphrase — runs unattended on the server)
-ssh-keygen -t ed25519 -f ~/.ssh/appx_deploy -N "" -C "appx-server-deploy"
-
-# Print the public key — copy the output
-cat ~/.ssh/appx_deploy.pub
-```
-
-On GitHub: **repo → Settings → Deploy keys → Add deploy key**. Paste the public key. Leave "Allow write access" unchecked — the server only needs to pull.
-
-```bash
-# Tell SSH to use this key for github.com
-cat >> ~/.ssh/config << 'EOF'
-Host github.com
-  IdentityFile ~/.ssh/appx_deploy
-  IdentitiesOnly yes
-EOF
-```
-
-### Initial setup
-
-```bash
-sudo apt-get install -y git
-
-# Use the SSH URL if the repo is private (use deploy key)
-git clone https://github.com/neuromaxer/appx.git /srv/appx
 cd /srv/appx
 sudo ./deploy/bootstrap.sh
 ```
 
-On first run, bootstrap prompts for server configuration:
-
-```
-Server hostname [138.x.x.x.sslip.io]:
-Data directory [/var/lib/appx]: /mnt/vol/appx-data
-Port [443]:
-```
-
-Press Enter to accept defaults. The hostname defaults to `<your-ip>.sslip.io` which provides free wildcard DNS — this enables subdomain routing for agent-built apps (e.g. `https://myapp.138.x.x.x.sslip.io`). You can also use your own domain here.
-
-If you want to use a persistent volume for storage (e.g. Hetzner Cloud Volumes), mount it first (Volumes -> Show configuration in Hetzner console) and enter the mount path as the data directory.
-
-The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.
-
-Bootstrap then creates OS users with proper isolation, installs tools (Node.js, Pi, Claude Code, uv, and agent-server), sets up systemd services, starts everything, and runs a verification suite. The Appx UI proxies project agent sessions to project-scoped `agent-server` runtimes and proxies provider-auth, subscription login, and custom-provider requests to shared Pi agent settings at `APPX_AGENT_SERVER_URL` (default `http://127.0.0.1:4001`). The Pi agent service runs with `NODE_USE_ENV_PROXY=1`, `HTTPS_PROXY=http://127.0.0.1:9080`, and `NO_PROXY=localhost,127.0.0.1`, so provider traffic goes through the Appx egress allowlist while local agent traffic stays on loopback.
-
-On first run, a random password is written to `{data-dir}/initial_password`. Delete the file after saving your password.
-
-Bootstrap installs these tools system-wide so agents can use them in the terminal or via agent:
-
-- **Task** — [taskfile.dev](https://taskfile.dev) build runner
-- **Go** — compiled from the version in `go.mod`
-- **Node.js 24 / npm** — JavaScript/TypeScript projects (installed via nvm, pinned to major version 24)
-- **uv** — Python version and package management (self-update: `uv self update`)
-- **Pi** — AI coding agent CLI/SDK (pinned version in `deploy/pi-version`)
-- **agent-server** — separate Appx org service that exposes Pi sessions over HTTP/SSE for the Agent tab
-- **Claude Code** — Claude CLI for terminal use (self-update: `sudo npm update -g @anthropic-ai/claude-code`)
-
-### Updating appx
-
-After pushing a new release:
-
-```bash
-cd /srv/appx
-task server:deploy
-```
-
-Pulls latest code, rebuilds, installs the binary, updates Pi/agent-server to the pinned versions, and restarts the needed services.
-
-### Updating Pi version
-
-Edit `deploy/pi-version` to the new version, then:
-
-```bash
-cd /srv/appx
-task server:deploy
-```
-
-### Updating Claude Code
-
-```bash
-sudo npm install -g @anthropic-ai/claude-code
-```
-
-No service restart needed — it's a CLI tool.
-
-### Verify installation
-
-```bash
-sudo ./deploy/verify-installation.sh
-```
-
-Checks users, permissions, isolation, tools, service files, and runtime. Exits 0 only if everything is correct.
-
-### Troubleshoot
-
-```bash
-journalctl -u appx -f            # appx logs
-journalctl -u agent-server -f    # Pi agent-server logs
-```
-
-### Deploy scripts
-
-| File / Script                   | When             | What                                                       |
-| ------------------------------- | ---------------- | ---------------------------------------------------------- |
-| `deploy/bootstrap.sh`           | Day 1            | Full setup: users, dirs, tools, build, start, verify       |
-| `deploy/system-setup.sh`        | Infra changes    | Users, groups, directories, service files, agent config    |
-| `deploy/tools-install.sh`       | Tool updates     | Go, Node.js 24, Pi, agent-server, Claude Code, uv          |
-| `deploy/agent-server.service`   | Pi backend       | Systemd unit for project-scoped Pi session service         |
-| `deploy/pi-version`             | Version pin      | Pinned Pi version installed by tools-install               |
-| `deploy/verify-installation.sh` | After any change | Full system verification                                   |
-
-## Local development
-
-### Temporary hack: link the `agent-client` SDK locally
-
-The Agent tab UI is provided by the `@appx-org/agent-client` package. Until that
-package is published to GitHub Packages, `web/package.json` links it from a
-**sibling checkout** via a `file:` dependency (`file:../../agent-client`), so the
-`agent-client` repo must be cloned next to `appx` (both under the same parent):
-
-```text
-<parent>/
-├── appx/         ← this repo
-└── agent-client/   ← github.com/appx-org/agent-client
-```
-
-```bash
-# one-time, beside your appx checkout
-git clone https://github.com/appx-org/agent-client.git ../agent-client
-# the package ships TypeScript source consumed directly by appx's Vite build,
-# so its own deps must be installed once for the symlinked import to resolve
-cd ../agent-client && npm install && cd -
-```
-
-`task web` / `task build` then follow the symlink and compile the SDK source as
-part of the frontend bundle. Vite dedupes React (see `web/vite.config.ts`) so
-the symlink can't pull a second React copy. When the package is published this
-`file:` spec swaps back to a semver range and the clone step goes away.
-
-### Run agent-server, then appx
-
-Run the sibling `agent-server` before starting appx. It needs `WORKSPACE_DIR`
-pointed at the **same** directory appx uses for projects (co-located dev), since
-agent-server owns the project directories and appx's subdomain proxy/terminal
-read them from that shared path:
-
-```bash
-cd ../agent-server
-WORKSPACE_DIR=/path/to/appx-data/projects \
-AGENT_SERVER_PORT=4001 \
-npm run dev
-```
-
-Then start appx with `--host 127.0.0.1.sslip.io` so that subdomain routing and session cookies work correctly across project subdomains. Plain `localhost` has inconsistent cookie-sharing behaviour for subdomains across browsers.
-
-```bash
-task local
-```
-
-Access the dashboard at `http://127.0.0.1.sslip.io:8080`. Project subdomains are at `http://<project>.127.0.0.1.sslip.io:8080`.
-
-For any change: edit → `task local` (Ctrl-C the running process first). There is no hot-reload dev server — appx embeds the compiled frontend at build time, so the local dev setup is identical to what runs on the server.
-
-[sslip.io](https://sslip.io) is public DNS — `anything.127.0.0.1.sslip.io` resolves to `127.0.0.1` with no setup required.
-
-## Persistent storage
-
-All state lives in the data directory (configured during bootstrap, default `/var/lib/appx`):
-
-| Contents                      | Path                      | Access    |
-| ----------------------------- | ------------------------- | --------- |
-| SQLite DB, TLS certs, secrets | `{data}/.appx-internals/` | appx only |
-| Project directories           | `{data}/projects/`        | shared    |
-
-Each new project's directory is created and owned by `agent-server` (under its
-`WORKSPACE_DIR`, which is the shared `{data}/projects/` path in a co-located
-deployment). The project's Pi harness (`{data}/projects/<name>/.pi/`) is owned by
-agent-server and currently starts empty — appx no longer scaffolds a prompt,
-guardrail extension, or egress skill into it (see
-`.superpowers/specs/2026-06-09-project-ownership-and-agent-client-integration-adr.md`).
-Reintroducing harness defaults/templates is tracked as future work.
-
-Pi credentials are configured from Settings. Built-in providers can use stored
-API keys or Pi subscription auth where the provider supports it, and custom
-providers such as LiteLLM are written to the agent service user's
-`models.json` without exposing secret values back to the browser.
-
-The Agent tab is the `@appx-org/agent-client` SDK talking to Appx's same-origin
-`/api/pi/*` mirror, which proxies the `agent-server` `/v1` session contract
-(keeping the bearer token server-side). `agent-server` turns all supported Pi
-providers into the same session HTTP/SSE contract, so the SDK handles Pi
-`message_update` events by `contentIndex` for text and tool-call blocks. Pi
-extension UI requests, including Appx guardrail approvals for risky commands, are
-delivered over the same session stream and answered through the mirror.
-
-To use a mounted volume, specify the path when bootstrap prompts for "Data directory". Bootstrap automatically creates the subdirectories with correct permissions.
-
-## Subdomain routing without a domain (sslip.io)
-
-Subdomain routing (e.g. `assistum.<base>`) requires a real domain name — bare IPs don't work because `assistum.91.98.144.204` isn't a valid hostname. [sslip.io](https://sslip.io) provides free wildcard DNS: `anything.IP.sslip.io` resolves to the embedded IP automatically.
-
-Edit `/etc/appx/appx.env` and set `APPX_HOST` to the sslip.io hostname:
-
-```bash
-APPX_HOST=91.98.144.204.sslip.io
-```
-
-Delete old TLS certs so they regenerate with the wildcard SAN, then restart:
-
-```bash
-sudo rm /var/lib/appx/.appx-internals/{cert,key}.pem
-sudo systemctl restart appx
-```
-
-This gives you:
-
-- `https://91.98.144.204.sslip.io` — dashboard
-- `https://assistum.91.98.144.204.sslip.io` — project subdomain
-- Session cookie shared across all subdomains via `Domain=.91.98.144.204.sslip.io`
-
-Note: the bare IP (`https://91.98.144.204`) will stop serving the dashboard. Access via the sslip.io hostname instead.
-
-See [docs/security/certificate_and_sslip.md](docs/security/certificate_and_sslip.md) for the full analysis of certificate generation, cookie scoping, and browser behaviour.
-
-## Automatic TLS via Let's Encrypt
-
-Uncomment and fill in the two variables in `/etc/appx/appx.env`:
-
-```bash
-APPX_DOMAIN=app.yourdomain.com
-CLOUDFLARE_API_TOKEN=your_token_here
-```
-
-Then restart: `sudo systemctl restart appx`.
-
-Appx requests certificates for `app.yourdomain.com` and `*.app.yourdomain.com` via Cloudflare DNS-01 challenge. No port 80 required.
-
-Requirements:
-
-- Cloudflare API token with **Zone > DNS > Edit** permissions
-- Domain managed by Cloudflare DNS
-
-## User isolation
-
-Bootstrap creates two OS users with a shared `projects` group:
-
-```
-appx      — runs the appx server, owns DB and TLS certs
-appx-agent — isolated agent user for Pi tooling, cannot access appx data
-projects  — shared group, both users read/write project directories
-```
-
-Directory permissions prevent agent tooling from accessing the appx database, TLS keys, or binary. Project directories use setgid so files created by either user are accessible to both.
-
-## Development
-
-```bash
-task local          # Build and run appx in HTTP dev mode (127.0.0.1.sslip.io)
-task test           # Run all Go tests
-task server:bootstrap   # First-time server setup
-task server:deploy      # Pull, build, install, restart
-task server:verify      # Post-deploy verification
-```
-
-See [CLAUDE.md](CLAUDE.md) for architecture details and development conventions.
-
-## Caveats
-
-- **Self-signed TLS (default).** Browsers show a security warning. Use `-domain` for automatic Let's Encrypt.
-- **Single-user only.** One password, one session store. Designed for personal use.
-- **Port 443 requires root.** Use `-port 8443` or grant `CAP_NET_BIND_SERVICE` (bootstrap handles this).
+See **[Self-Hosting](docs/readme/self-hosting.md)** for the complete, ordered steps.

@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
-# deploy/system-setup.sh — create OS users, groups, directories, and install
-# systemd service files for appx plus the Pi agent backend.
+# deploy/system-setup.sh — create OS users, groups, directories, and install the
+# appx systemd service.
 #
 # Must be run as root. Safe to run multiple times (idempotent).
 #
+# Deploy is CONTAINER MODE ONLY (Stage 4): appx runs as the `appx` systemd
+# service and creates/supervises the agent-server OUTER container itself (one
+# unprivileged container holding agent-server + rootless podman). There is no
+# host `appx-agent` user, no host `agent-server.service`, and no host install of
+# Node/Pi/agent-server. Local development does not use this script — a developer
+# runs agent-server by hand and `appx --http` with APPX_AGENT_SERVER_URL.
+#
 # What this script does:
 #   1. Reads APPX_DATA from /etc/appx/appx.env (falls back to /var/lib/appx)
-#   2. Creates appx and appx-agent users with login shells (/bin/bash)
-#      — appx user's home dir is set to the data directory
-#   3. Creates a shared "projects" group for project directory access
-#   4. Sets up directories with correct ownership and permissions
-#   5. Copies systemd service files and enables them
+#   2. Creates the appx user (home = data dir) and the shared projects group
+#   3. Sets up directories with correct ownership and permissions
+#   4. Installs the tailored seccomp profile to /etc/appx/
+#   5. Adds appx to the docker group so the service can drive the daemon
+#   6. Removes any stale host-mode artifacts (appx-agent user, agent-server.service)
+#   7. Copies the appx systemd service file and enables it
 #
 # What this script does NOT do:
-#   - Install Go, Node, Pi, agent-server, or Claude binaries (use tools-install.sh)
+#   - Install Go, Node, Pi, agent-server, or the outer image (use tools-install.sh)
 #   - Copy the appx binary (handled by bootstrap.sh / server:deploy)
 
 set -euo pipefail
@@ -38,24 +46,14 @@ if [ -f /etc/appx/appx.env ]; then
   fi
 fi
 echo "data directory: $DATA_DIR"
-
-# Container mode (Stage 3): appx creates/supervises the agent-server OUTER
-# container itself; there is no host appx-agent user or agent-server.service.
-# Host mode (the default until container mode has soaked in prod) keeps them.
-APPX_AGENT_CONTAINER="false"
-if [ -f /etc/appx/appx.env ]; then
-  _CM=$(grep '^APPX_AGENT_CONTAINER=' /etc/appx/appx.env | cut -d= -f2- || true)
-  case "$(echo "${_CM}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|yes|on) APPX_AGENT_CONTAINER="true" ;;
-  esac
-fi
-echo "agent backend: pi ($([ "$APPX_AGENT_CONTAINER" = true ] && echo 'container mode' || echo 'host mode'))"
+echo "agent backend: pi (container mode — appx supervises the outer container)"
 
 # ---------------------------------------------------------------------------
 # OS users and groups
 # ---------------------------------------------------------------------------
 
-# Shared group — appx and appx-agent get read/write access to project directories.
+# Shared group — appx (and, inside the container, the agent uid) reach project
+# directories through this group.
 if ! getent group projects >/dev/null 2>&1; then
   groupadd --system projects
   echo "created group: projects"
@@ -82,25 +80,26 @@ else
   fi
 fi
 
-# appx-agent user — runs the Pi agent-server process (HOST MODE ONLY). In
-# container mode agent-server runs as uid 1000 *inside* the outer container, so
-# no host user is needed.
-if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
-  echo "container mode: skipping appx-agent user (agent-server runs inside the outer container)"
-else
-  if ! getent group appx-agent >/dev/null 2>&1; then
-    groupadd --system appx-agent
-    echo "created group: appx-agent"
-  fi
-  if ! id -u appx-agent >/dev/null 2>&1; then
-    useradd --system --create-home --shell /bin/bash --home-dir /home/appx-agent \
-      --gid appx-agent --groups projects appx-agent
-    echo "created user: appx-agent"
-  else
-    usermod --shell /bin/bash --home /home/appx-agent --append --groups projects appx-agent || true
-    echo "user appx-agent already exists (updated shell, home, and groups)"
-  fi
+# ---------------------------------------------------------------------------
+# Remove stale host-mode artifacts (upgrade from a pre-Stage-4 install).
+# Host mode is gone: no appx-agent user, no /home/appx-agent, no
+# agent-server.service. Clean them up idempotently so nothing dangles.
+# ---------------------------------------------------------------------------
+
+if systemctl list-unit-files 2>/dev/null | grep -q '^agent-server.service'; then
+  systemctl disable --now agent-server 2>/dev/null || true
 fi
+rm -f /etc/systemd/system/agent-server.service
+if id -u appx-agent >/dev/null 2>&1; then
+  pkill -u appx-agent 2>/dev/null || true
+  sleep 1
+  userdel --remove appx-agent 2>/dev/null || userdel appx-agent 2>/dev/null || true
+  echo "removed stale host-mode user: appx-agent"
+fi
+if getent group appx-agent >/dev/null 2>&1; then
+  groupdel appx-agent 2>/dev/null || true
+fi
+rm -rf /home/appx-agent 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Directories
@@ -111,72 +110,53 @@ fi
 install -d -o appx -g appx -m 755 "$DATA_DIR"
 echo "directory ready: $DATA_DIR (appx:appx 755)"
 
-# Internals subdir: DB, TLS certs, password — appx-only, no access for others.
+# Internals subdir: DB, TLS certs, password, AGENT_SERVER_TOKEN — appx-only.
 install -d -o appx -g appx -m 700 "$DATA_DIR/.appx-internals"
 echo "directory ready: $DATA_DIR/.appx-internals (appx:appx 700)"
 
-# Projects subdir: shared workspace for appx and appx-agent.
-# Setgid ensures new files inherit the projects group.
+# Projects subdir: shared workspace. Setgid ensures new files inherit the
+# projects group.
 install -d -o appx -g projects -m 2770 "$DATA_DIR/projects"
 echo "directory ready: $DATA_DIR/projects (appx:projects 2770)"
 
-# /home/appx-agent: private Pi agent workspace (HOST MODE ONLY).
-if [ "$APPX_AGENT_CONTAINER" != "true" ]; then
-  install -d -o appx-agent -g appx-agent -m 700 /home/appx-agent
-  echo "directory ready: /home/appx-agent (appx-agent:appx-agent 700)"
-  if [ ! -d /home/appx-agent/.pi ] && [ -d /home/opencode/.pi ]; then
-    cp -a /home/opencode/.pi /home/appx-agent/.pi
-    chown -R appx-agent:appx-agent /home/appx-agent/.pi
-    chmod 700 /home/appx-agent/.pi /home/appx-agent/.pi/agent 2>/dev/null || true
-    echo "migrated existing Pi agent data to /home/appx-agent/.pi"
-  fi
+# ---------------------------------------------------------------------------
+# Container mode: the seccomp profile appx references + docker access
+# ---------------------------------------------------------------------------
 
-  # Pi agent config/auth/cache dir. Pi is project-local for prompts, skills, and
-  # extensions, but auth/models/settings that should not live in project repos go
-  # under the agent user's private home directory.
-  PI_AGENT_DIR="/home/appx-agent/.pi/agent"
-  install -d -o appx-agent -g appx-agent -m 700 "$PI_AGENT_DIR"
-  install -d -o appx-agent -g appx-agent -m 700 "$PI_AGENT_DIR/npm"
-  install -d -o appx-agent -g appx-agent -m 700 "$PI_AGENT_DIR/git"
-  echo "directory ready: $PI_AGENT_DIR (appx-agent:appx-agent 700)"
+# The tailored seccomp profile is the security boundary; appx references it by
+# absolute path at `docker run` time. Install it where APPX_AGENT_SECCOMP points.
+install -d -m 755 /etc/appx
+if [ -f "$SCRIPT_DIR/builder-container/seccomp-builder.json" ]; then
+  install -m 644 "$SCRIPT_DIR/builder-container/seccomp-builder.json" /etc/appx/seccomp-builder.json
+  echo "installed seccomp profile → /etc/appx/seccomp-builder.json"
+else
+  echo "WARNING: seccomp-builder.json not found in $SCRIPT_DIR/builder-container/ — set APPX_AGENT_SECCOMP manually"
 fi
 
-# ---------------------------------------------------------------------------
-# Container mode: docker access + the security profile appx references
-# ---------------------------------------------------------------------------
-# Decision (docker invocation privilege): the INDUSTRY-STANDARD secure option is
-# rootless docker or host podman for the appx user — docker *group* membership is
-# root-equivalent (you can `docker run -v /:/host` and own the box). We therefore
-# PREFER rootless. If the appx user already has a working rootless docker/podman,
-# we leave it alone. Otherwise we fall back to the docker group with a loud
-# warning, because the alternative is a non-functional deploy. Document the
-# trade-off in your threat model; the long-term target is rootless.
-if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
-  # The tailored seccomp profile is the security boundary; appx references it by
-  # absolute path at `docker run` time. Install it where APPX_AGENT_SECCOMP points.
-  install -d -m 755 /etc/appx
-  if [ -f "$SCRIPT_DIR/builder-container/seccomp-builder.json" ]; then
-    install -m 644 "$SCRIPT_DIR/builder-container/seccomp-builder.json" /etc/appx/seccomp-builder.json
-    echo "installed seccomp profile → /etc/appx/seccomp-builder.json"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "WARNING: docker is not installed. The outer runtime MUST be rootful host"
+  echo "         Docker (validated by the spike: rootless docker breaks nested"
+  echo "         rootless podman). Install it, e.g.: apt-get install -y docker.io"
+fi
+
+# Docker access for the appx user (DECIDED — see phase_9_plan.md Stage 4 / Risk
+# #4). The outer runtime is rootful host Docker (rootless-docker-outer is
+# non-viable for the nested-podman workload), so the unprivileged `appx` service
+# user reaches the root daemon via the `docker` group. NOTE: docker-group
+# membership is ROOT-EQUIVALENT (`docker run -v /:/host` owns the box); accepted
+# here on a dedicated single-purpose box + dedicated appx user. Scoping it down
+# (docker-socket proxy / narrow sudoers) is Stage 5 hardening — do NOT attempt
+# rootless. Under systemd User=appx the service inherits the group after
+# daemon-reload + restart.
+if getent group docker >/dev/null 2>&1; then
+  if id -nG appx 2>/dev/null | grep -qw docker; then
+    echo "appx already in the docker group"
   else
-    echo "WARNING: seccomp-builder.json not found in $SCRIPT_DIR/builder-container/ — set APPX_AGENT_SECCOMP manually"
+    usermod --append --groups docker appx || true
+    echo "added appx to the 'docker' group (root-equivalent — Stage 5 scopes it down)"
   fi
-
-  if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
-    echo "WARNING: neither docker nor podman is installed. Install one before starting appx in container mode."
-    echo "         (Ubuntu: 'apt-get install -y docker.io' for rootful docker, or set up rootless docker / podman.)"
-  fi
-
-  # If the appx user can't already drive a container runtime, fall back to the
-  # docker group (root-equivalent — see decision above).
-  if command -v docker >/dev/null 2>&1; then
-    if su -s /bin/sh appx -c 'docker info' >/dev/null 2>&1; then
-      echo "appx user can already invoke docker (rootless or pre-configured) — leaving as-is"
-    elif getent group docker >/dev/null 2>&1; then
-      usermod --append --groups docker appx || true
-      echo "WARNING: added appx to the 'docker' group (root-equivalent). Prefer rootless docker/podman in hardened deployments."
-    fi
-  fi
+else
+  echo "WARNING: no 'docker' group present — install rootful docker so appx can drive the daemon"
 fi
 
 # ---------------------------------------------------------------------------
@@ -190,43 +170,21 @@ if [ -f /usr/local/bin/appx ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Systemd service files
+# Systemd service file
 # ---------------------------------------------------------------------------
 
 cp "$SCRIPT_DIR/appx.service" /etc/systemd/system/appx.service
+echo "copied appx.service"
 
+# Clean up legacy units.
 systemctl disable --now opencode 2>/dev/null || true
 rm -f /etc/systemd/system/opencode.service
 
-if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
-  # Container mode: appx supervises the outer container itself — no host
-  # agent-server.service. Disable a stale one if a prior host-mode install left it.
-  if systemctl list-unit-files 2>/dev/null | grep -q '^agent-server.service'; then
-    systemctl disable --now agent-server 2>/dev/null || true
-    rm -f /etc/systemd/system/agent-server.service
-    echo "container mode: removed host agent-server.service (appx manages the outer container)"
-  fi
-  systemctl daemon-reload
-  echo "systemd reloaded"
-  systemctl enable appx
-  echo "services enabled: appx (agent-server runs inside the appx-managed container)"
-else
-  if ! systemctl is-active --quiet agent-server 2>/dev/null; then
-    pkill -u appx-agent -f '(^|/)agent-server( |$)|agent-server/dist/server\.js' 2>/dev/null || true
-    if id -u opencode >/dev/null 2>&1; then
-      pkill -u opencode -f '(^|/)agent-server( |$)|agent-server/dist/server\.js' 2>/dev/null || true
-    fi
-  fi
-  sed "s|__APPX_PROJECTS_DIR__|$DATA_DIR/projects|g" \
-    "$SCRIPT_DIR/agent-server.service" > /etc/systemd/system/agent-server.service
-  echo "copied appx.service and agent-server.service"
+systemctl daemon-reload
+echo "systemd reloaded"
 
-  systemctl daemon-reload
-  echo "systemd reloaded"
-
-  systemctl enable appx agent-server
-  echo "services enabled: appx, agent-server"
-fi
+systemctl enable appx
+echo "service enabled: appx (agent-server runs inside the appx-managed container)"
 
 # ---------------------------------------------------------------------------
 # Summary

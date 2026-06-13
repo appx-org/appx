@@ -79,6 +79,14 @@ type ContainerSpec struct {
 	// ReadinessURL is the agent-server health URL appx polls after create/start
 	// (e.g. "http://127.0.0.1:4001/").
 	ReadinessURL string
+
+	// RestartPolicy is the docker `--restart` policy (e.g. "unless-stopped").
+	// This makes the DOCKER DAEMON resurrect the outer container on process
+	// crash AND on host reboot, independent of appx — appx's EnsureRunning runs
+	// only at startup, so the daemon (not appx) is the watchdog that keeps the
+	// container process alive. Empty = no policy (docker default "no").
+	// See docs/plans/phase_9_plan.md (Stage 4, supervision model).
+	RestartPolicy string
 }
 
 // RunArgs returns the full `docker run` argument vector (excluding the leading
@@ -94,6 +102,7 @@ func (s ContainerSpec) RunArgs() []string {
 		"run", "-d", "--name", s.Name,
 
 		// ── proven security boundary (verbatim from run-outer.sh) ──
+		// (restart policy appended below — orthogonal to the security boundary)
 		// rootless slirp4netns networking opens /dev/net/tun.
 		"--device", "/dev/net/tun",
 		// tailored seccomp profile: docker's default blocks mount(2); this is
@@ -105,6 +114,14 @@ func (s ContainerSpec) RunArgs() []string {
 		// docker masks /proc submounts; the kernel then blocks the inner
 		// container's fresh proc mount. Adds no caps/privilege.
 		"--security-opt", "systempaths=unconfined",
+	}
+
+	// Daemon-driven restart policy: keeps the outer container alive across
+	// crashes + reboots without appx (the daemon is the watchdog). Composes with
+	// the entrypoint's stale-XDG_RUNTIME_DIR wipe + `podman start --all` on a
+	// daemon-driven restart. NOT a security flag.
+	if s.RestartPolicy != "" {
+		args = append(args, "--restart", s.RestartPolicy)
 	}
 
 	// Optional resource limits (Stage 4 policy lives elsewhere; this is plumbing).

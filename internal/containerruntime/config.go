@@ -48,6 +48,11 @@ type Config struct {
 	CPUs   string // optional --cpus
 
 	ReadinessURL string // agent-server health URL (e.g. http://127.0.0.1:4001/)
+
+	// RestartPolicy is the docker --restart policy. Empty defaults to
+	// DefaultRestartPolicy ("unless-stopped") so the daemon keeps the outer
+	// container alive across crashes + reboots independent of appx.
+	RestartPolicy string
 }
 
 // defaults for the named volumes and bind hosts — match the proven run-outer.sh.
@@ -59,6 +64,11 @@ const (
 	DefaultPodmanDest      = "/home/builder/.local/share/containers"
 	DefaultWorkspaceDest   = "/workspace"
 	DefaultBindHost        = "127.0.0.1"
+	// DefaultRestartPolicy makes the Docker daemon resurrect the outer container
+	// on crash and on reboot (Stage 4 supervision model): the daemon keeps the
+	// container process alive; appx ensures it exists/is-correct/is-healthy at
+	// startup; appx.service Restart=on-failure covers appx itself.
+	DefaultRestartPolicy = "unless-stopped"
 )
 
 // BuildSpec turns a Config into a ContainerSpec, applying defaults. It is pure
@@ -81,6 +91,9 @@ func BuildSpec(cfg Config) ContainerSpec {
 	}
 	if cfg.PodmanVolume == "" {
 		cfg.PodmanVolume = DefaultPodmanVolume
+	}
+	if cfg.RestartPolicy == "" {
+		cfg.RestartPolicy = DefaultRestartPolicy
 	}
 
 	env := map[string]string{
@@ -127,6 +140,7 @@ func BuildSpec(cfg Config) ContainerSpec {
 		Memory:         cfg.Memory,
 		CPUs:           cfg.CPUs,
 		ReadinessURL:   cfg.ReadinessURL,
+		RestartPolicy:  cfg.RestartPolicy,
 	}
 }
 

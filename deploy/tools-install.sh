@@ -2,16 +2,22 @@
 # deploy/tools-install.sh — install build and runtime tools system-wide.
 #
 # Must be run as root. Safe to run multiple times (idempotent).
-# Installs everything to /usr/local/bin so all users (appx, appx-agent) have access.
+# Installs everything to /usr/local/bin so the appx user has access.
+#
+# Deploy is CONTAINER MODE ONLY (Stage 4): agent-server + Pi run INSIDE the
+# appx-managed outer container, so this script does NOT install Pi or
+# agent-server on the host. Instead it builds (or pulls) the outer image. The
+# outer image's Dockerfile is multi-stage and compiles agent-server in a node:22
+# stage, so building it on the box needs docker + the agent-server source, not
+# host Node.
 #
 # Tools installed:
-#   - Go         (version pinned to go.mod — build tool)
-#   - Task        (taskfile.dev build runner — build tool)
-#   - Node.js 24  (via nvm, pinned to major version — runtime + agents)
-#   - Pi          (AI coding agent CLI/SDK, version pinned to deploy/pi-version)
-#   - agent-server (Pi SDK HTTP/SSE bridge, installed from sibling repo when present)
-#   - Claude Code (Claude CLI for terminal use — self-update: npm update -g @anthropic-ai/claude-code)
-#   - uv          (Python version/package manager — self-update: uv self update)
+#   - Go          (version pinned to go.mod — builds the appx binary)
+#   - Task        (taskfile.dev build runner — builds the appx binary)
+#   - Node.js 24  (via nvm, pinned to major version — builds the appx web UI)
+#   - Claude Code (Claude CLI for the terminal feature in user shells)
+#   - uv          (Python version/package manager for the terminal feature)
+#   - the outer builder image (built from the agent-server checkout, tag-pinned)
 #
 # Supported platforms: Ubuntu/Debian (amd64, arm64).
 
@@ -24,17 +30,6 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Container mode (Stage 3): agent-server runs INSIDE the appx-managed outer
-# container, so we build/pull that image instead of installing agent-server +
-# Pi on the host. Host mode (default until container mode soaks) is unchanged.
-APPX_AGENT_CONTAINER="false"
-if [ -f /etc/appx/appx.env ]; then
-  _CM=$(grep '^APPX_AGENT_CONTAINER=' /etc/appx/appx.env | cut -d= -f2- || true)
-  case "$(echo "${_CM}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|yes|on) APPX_AGENT_CONTAINER="true" ;;
-  esac
-fi
 
 # Detect architecture.
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
@@ -133,48 +128,26 @@ npm uninstall -g opencode-ai >/dev/null 2>&1 || true
 rm -f /usr/local/bin/opencode "$NODE_BIN_DIR/opencode"
 
 # ---------------------------------------------------------------------------
-# Pi coding agent (installed via npm, pinned to deploy/pi-version)
+# Remove stale host-mode agent backends (upgrade from a pre-Stage-4 install).
+# In container mode Pi + agent-server run INSIDE the outer image, never on the
+# host. Clean up any host install idempotently.
 # ---------------------------------------------------------------------------
 
-PI_VERSION=""
-if [ -f "$SCRIPT_DIR/pi-version" ]; then
-  PI_VERSION=$(cat "$SCRIPT_DIR/pi-version" | tr -d '[:space:]')
-fi
-
-CURRENT_PI=$(/usr/local/bin/pi --version 2>&1 || echo "")
-
-if [ -n "$PI_VERSION" ] && [ "$CURRENT_PI" = "$PI_VERSION" ]; then
-  echo "pi already at $PI_VERSION"
-else
-  echo "installing pi${PI_VERSION:+ $PI_VERSION} via npm..."
-  npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION:-latest}"
-  ln -sf "$NODE_BIN_DIR/pi" /usr/local/bin/pi
-  echo "pi installed: $(/usr/local/bin/pi --version 2>&1)"
+npm uninstall -g @earendil-works/pi-coding-agent >/dev/null 2>&1 || true
+rm -f /usr/local/bin/pi "$NODE_BIN_DIR/pi"
+if [ -x /usr/local/bin/agent-server ] || [ -x "$NODE_BIN_DIR/agent-server" ]; then
+  npm uninstall -g agent-server >/dev/null 2>&1 || true
+  rm -f /usr/local/bin/agent-server "$NODE_BIN_DIR/agent-server"
+  echo "removed stale host agent-server (it now runs inside the outer container)"
 fi
 
 # ---------------------------------------------------------------------------
-# Appx agent-server (installed from sibling checkout when present)
+# Locate the agent-server checkout (used to build the outer image below).
 # ---------------------------------------------------------------------------
 
 AGENT_SERVER_DIR="${AGENT_SERVER_DIR:-}"
 if [ -z "$AGENT_SERVER_DIR" ] && [ -d "$REPO_DIR/../agent-server" ]; then
   AGENT_SERVER_DIR="$(cd "$REPO_DIR/../agent-server" && pwd)"
-fi
-
-if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
-  echo "container mode: skipping host agent-server install (it runs inside the outer image)"
-elif [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/package.json" ]; then
-  echo "installing agent-server from $AGENT_SERVER_DIR..."
-  (
-    cd "$AGENT_SERVER_DIR"
-    npm ci
-    npm run build
-    npm install -g .
-  )
-  ln -sf "$NODE_BIN_DIR/agent-server" /usr/local/bin/agent-server
-  echo "agent-server installed: /usr/local/bin/agent-server"
-else
-  echo "agent-server repo not found; clone appx-org/agent-server next to appx or set AGENT_SERVER_DIR"
 fi
 
 # ---------------------------------------------------------------------------
@@ -201,8 +174,7 @@ else
   curl -LsSf https://astral.sh/uv/install.sh | sh
   # Installer puts it in ~/.local/bin/ — copy to system path.
   for candidate in \
-      /root/.local/bin/uv \
-      /home/appx-agent/.local/bin/uv; do
+      /root/.local/bin/uv; do
     if [ -x "$candidate" ]; then
       install -m 755 "$candidate" /usr/local/bin/uv
       echo "copied uv → /usr/local/bin/uv"
@@ -212,33 +184,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Outer builder image (container mode) — build from the agent-server checkout
-# or pull a pinned tag/digest.
+# Outer builder image — build from the agent-server checkout, or pull a pinned
+# registry tag/digest. This is the only agent backend in container-mode deploy.
 # ---------------------------------------------------------------------------
 
-if [ "$APPX_AGENT_CONTAINER" = "true" ]; then
-  RUNTIME=""
-  command -v docker >/dev/null 2>&1 && RUNTIME="docker"
-  [ -z "$RUNTIME" ] && command -v podman >/dev/null 2>&1 && RUNTIME="podman"
+RUNTIME=""
+command -v docker >/dev/null 2>&1 && RUNTIME="docker"
+[ -z "$RUNTIME" ] && command -v podman >/dev/null 2>&1 && RUNTIME="podman"
 
-  # Pin the image. APPX_AGENT_IMAGE may be a tag (built locally) or a registry
-  # ref / digest to pull (e.g. registry.example.com/builder-outer@sha256:...).
-  APPX_AGENT_IMAGE="${APPX_AGENT_IMAGE:-builder-outer}"
+# Pin the image. APPX_AGENT_IMAGE may be a local tag (built here) or a registry
+# ref / digest to pull (e.g. registry.example.com/builder-outer@sha256:...).
+APPX_AGENT_IMAGE="${APPX_AGENT_IMAGE:-builder-outer}"
 
-  if [ -z "$RUNTIME" ]; then
-    echo "WARNING: no docker/podman found — cannot build/pull the outer image '$APPX_AGENT_IMAGE'"
-  elif printf '%s' "$APPX_AGENT_IMAGE" | grep -q '/'; then
-    # Looks like a registry reference → pull it (pinned by tag or digest).
-    echo "pulling outer image: $APPX_AGENT_IMAGE"
-    "$RUNTIME" pull "$APPX_AGENT_IMAGE"
-  elif [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/container/Dockerfile" ]; then
-    echo "building outer image '$APPX_AGENT_IMAGE' from $AGENT_SERVER_DIR ..."
-    "$RUNTIME" build -f "$AGENT_SERVER_DIR/container/Dockerfile" -t "$APPX_AGENT_IMAGE" "$AGENT_SERVER_DIR"
-    echo "built outer image: $APPX_AGENT_IMAGE"
-  else
-    echo "WARNING: APPX_AGENT_IMAGE='$APPX_AGENT_IMAGE' is a local tag but no agent-server checkout was found to build it."
-    echo "         Clone appx-org/agent-server next to appx, set AGENT_SERVER_DIR, or set APPX_AGENT_IMAGE to a pullable ref."
-  fi
+if [ -z "$RUNTIME" ]; then
+  echo "ERROR: no docker found — the outer runtime MUST be rootful host Docker." >&2
+  echo "       Install it (apt-get install -y docker.io) and re-run." >&2
+  exit 1
+elif printf '%s' "$APPX_AGENT_IMAGE" | grep -q '/'; then
+  # Looks like a registry reference → pull it (pinned by tag or digest).
+  echo "pulling outer image: $APPX_AGENT_IMAGE"
+  "$RUNTIME" pull "$APPX_AGENT_IMAGE"
+elif [ -n "$AGENT_SERVER_DIR" ] && [ -f "$AGENT_SERVER_DIR/container/Dockerfile" ]; then
+  echo "building outer image '$APPX_AGENT_IMAGE' from $AGENT_SERVER_DIR ..."
+  "$RUNTIME" build -f "$AGENT_SERVER_DIR/container/Dockerfile" -t "$APPX_AGENT_IMAGE" "$AGENT_SERVER_DIR"
+  echo "built outer image: $APPX_AGENT_IMAGE"
+else
+  echo "ERROR: APPX_AGENT_IMAGE='$APPX_AGENT_IMAGE' is a local tag but no agent-server checkout was found to build it." >&2
+  echo "       Clone appx-org/agent-server next to appx, set AGENT_SERVER_DIR, or set APPX_AGENT_IMAGE to a pullable ref." >&2
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -252,6 +225,5 @@ echo "  task:     $(task --version 2>/dev/null || echo 'not found')"
 echo "  go:       $(go version 2>/dev/null || echo 'not found')"
 echo "  node:     $(/usr/local/bin/node --version 2>/dev/null || echo 'not found')"
 echo "  uv:       $(/usr/local/bin/uv --version 2>/dev/null || echo 'not found')"
-echo "  pi:       $(/usr/local/bin/pi --version 2>&1 || echo 'not found')"
-echo "  agent-server: $(test -x /usr/local/bin/agent-server && echo installed || echo 'not found')"
 echo "  claude:   $(claude --version 2>/dev/null || echo 'not found')"
+echo "  outer image ($APPX_AGENT_IMAGE): $("$RUNTIME" image inspect "$APPX_AGENT_IMAGE" >/dev/null 2>&1 && echo present || echo 'not found')"
