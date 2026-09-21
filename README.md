@@ -12,9 +12,9 @@ Appx builds on the agent stack published from **[appx-agent](https://github.com/
 
 | Dependency | What it is | How appx consumes it |
 | --- | --- | --- |
-| `agent-server` | The HTTP/SSE agent runtime wrapping Pi. Owns project identity, on-disk project directories, session transcripts, models, and credentials. | `ghcr.io/appx-org/agent-server` docker image, pulled and supervised by appx |
-| [`@appx-org/agent-client`](https://www.npmjs.com/package/@appx-org/agent-client) | The TypeScript SDK and React chat UI for the agent-server `/v1` contract. | npm dependency of `web/`, pointed at the same-origin `/api/pi` mirror |
-| [`@appx-org/agent-protocol`](https://www.npmjs.com/package/@appx-org/agent-protocol) | The published wire contract (OpenAPI + SSE event schema + generated types). | transitive, via agent-client |
+| [`agent-server`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-server) | The HTTP/SSE agent runtime wrapping Pi. Owns project identity, on-disk project directories, session transcripts, models, and credentials. | [`ghcr.io/appx-org/agent-server`](https://github.com/appx-org/appx-agent/pkgs/container/agent-server) docker image, pulled and supervised by appx |
+| [`agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client) | The TypeScript SDK and React chat UI for the agent-server `/v1` contract. | [`@appx-org/agent-client`](https://www.npmjs.com/package/@appx-org/agent-client) npm dependency of `web/`, pointed at the same-origin `/api/pi` mirror |
+| [`agent-protocol`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-protocol) | The published wire contract (OpenAPI + SSE event schema + generated types). | [`@appx-org/agent-protocol`](https://www.npmjs.com/package/@appx-org/agent-protocol) on npm, transitive via agent-client |
 
 ## Architecture
 
@@ -49,7 +49,7 @@ Pi is the agent runtime. In production appx runs as the `appx` systemd service a
 An **amd64** Linux host (Ubuntu 24.04 LTS recommended — the published agent-server image is amd64-only), `git`, and **rootful Docker**. No sibling checkouts: bootstrap pulls the agent-server image and installs the npm packages for you.
 
 ```bash
-git clone https://github.com/neuromaxer/appx.git /srv/appx
+git clone https://github.com/appx-org/appx.git /srv/appx
 cd /srv/appx
 sudo ./deploy/bootstrap.sh
 ```

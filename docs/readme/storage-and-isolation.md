@@ -49,8 +49,10 @@ API keys or Pi subscription auth where the provider supports it; custom provider
 (e.g. LiteLLM) are written to the agent's Pi storage inside the container without
 exposing secret values back to the browser.
 
-The Agent tab is the `@appx-org/agent-client` SDK talking to Appx's same-origin
-`/api/pi/*` mirror, which proxies the `agent-server` `/v1` session contract
+The Agent tab is the
+[`@appx-org/agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client)
+SDK talking to Appx's same-origin `/api/pi/*` mirror, which proxies the
+[`agent-server`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-server) `/v1` session contract
 (keeping the bearer token server-side). `agent-server` turns all supported Pi
 providers into the same HTTP/SSE session contract. Pi extension UI requests —
 including Appx guardrail approvals for risky commands — are delivered over the

@@ -5,8 +5,11 @@ creates/supervises the agent-server **outer container** (one unprivileged
 container holding agent-server + rootless podman). There is no host `appx-agent`
 user, no `agent-server.service`, and no host install of Pi/agent-server.
 
-appx depends only on **published artifacts** — the `ghcr.io/appx-org/agent-server`
-image and the `@appx-org/agent-client` npm package, both released from the
+appx depends only on **published artifacts** — the
+[`ghcr.io/appx-org/agent-server`](https://github.com/appx-org/appx-agent/pkgs/container/agent-server)
+image and the
+[`@appx-org/agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client)
+npm package, both released from the
 [appx-agent](https://github.com/appx-org/appx-agent) monorepo. There are no
 sibling repos to clone.
 
@@ -32,7 +35,7 @@ sudo apt-get install -y git docker.io
 sudo systemctl enable --now docker
 
 # 2. Clone appx and run bootstrap from inside it.
-git clone https://github.com/neuromaxer/appx.git /srv/appx
+git clone https://github.com/appx-org/appx.git /srv/appx
 cd /srv/appx
 sudo ./deploy/bootstrap.sh
 ```
@@ -135,11 +138,12 @@ moving to a newer published image.
 
 The version appx is tested against lives in the **`AGENT_VERSION`** file at the
 repo root — one line, the single source of truth for both the docker image and the
-`@appx-org/agent-client` npm package (appx-agent versions them in lockstep). To
+[`@appx-org/agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client)
+npm package ([appx-agent](https://github.com/appx-org/appx-agent) versions them in lockstep). To
 move the whole checkout to a new agent release:
 
 ```bash
-echo 0.1.8 > AGENT_VERSION
+echo 0.3.1 > AGENT_VERSION
 task agent:sync   # rewrites web/package.json's range + the lockfile
 task test         # fails if you skip agent:sync
 ```
