@@ -8,11 +8,13 @@ point appx at it with `APPX_AGENT_SERVER_URL`; appx runs as a plain process with
 Everything appx depends on is a published artifact, so there is nothing to check
 out alongside this repo:
 
-- `@appx-org/agent-client` (and its `@appx-org/agent-protocol` dependency) come
-  from the public npm registry and are installed by `task web` / `task build`
-  like any other dependency.
-- `agent-server` comes from `ghcr.io/appx-org/agent-server`, which is publicly
-  pullable — no registry login required.
+- [`@appx-org/agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client)
+  (and its [`@appx-org/agent-protocol`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-protocol)
+  dependency) come from the public npm registry and are installed by `task web` /
+  `task build` like any other dependency.
+- [`agent-server`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-server)
+  comes from [`ghcr.io/appx-org/agent-server`](https://github.com/appx-org/appx-agent/pkgs/container/agent-server),
+  which is publicly pullable — no registry login required.
 
 Both are released from the
 [appx-agent](https://github.com/appx-org/appx-agent) monorepo.
@@ -45,7 +47,8 @@ to run it emulated — slower, but fine for driving the appx UI.
 > so the agent can build and run *inner* app containers; a plain `docker run` is
 > enough for working on appx itself.
 
-To iterate on agent-server's own code, clone the monorepo and run
+To iterate on agent-server's own code, clone the
+[monorepo](https://github.com/appx-org/appx-agent) and run
 `npm run dev -w packages/agent-server` with `WORKSPACE_DIR` set instead of using
 the image.
 

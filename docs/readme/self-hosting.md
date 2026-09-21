@@ -5,8 +5,11 @@ creates/supervises the agent-server **outer container** (one unprivileged
 container holding agent-server + rootless podman). There is no host `appx-agent`
 user, no `agent-server.service`, and no host install of Pi/agent-server.
 
-appx depends only on **published artifacts** — the `ghcr.io/appx-org/agent-server`
-image and the `@appx-org/agent-client` npm package, both released from the
+appx depends only on **published artifacts** — the
+[`ghcr.io/appx-org/agent-server`](https://github.com/appx-org/appx-agent/pkgs/container/agent-server)
+image and the
+[`@appx-org/agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client)
+npm package, both released from the
 [appx-agent](https://github.com/appx-org/appx-agent) monorepo. There are no
 sibling repos to clone.
 
@@ -135,7 +138,8 @@ moving to a newer published image.
 
 The version appx is tested against lives in the **`AGENT_VERSION`** file at the
 repo root — one line, the single source of truth for both the docker image and the
-`@appx-org/agent-client` npm package (appx-agent versions them in lockstep). To
+[`@appx-org/agent-client`](https://github.com/appx-org/appx-agent/tree/main/packages/agent-client)
+npm package ([appx-agent](https://github.com/appx-org/appx-agent) versions them in lockstep). To
 move the whole checkout to a new agent release:
 
 ```bash
