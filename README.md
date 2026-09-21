@@ -49,7 +49,7 @@ Pi is the agent runtime. In production appx runs as the `appx` systemd service a
 An **amd64** Linux host (Ubuntu 24.04 LTS recommended — the published agent-server image is amd64-only), `git`, and **rootful Docker**. No sibling checkouts: bootstrap pulls the agent-server image and installs the npm packages for you.
 
 ```bash
-git clone https://github.com/neuromaxer/appx.git /srv/appx
+git clone https://github.com/appx-org/appx.git /srv/appx
 cd /srv/appx
 sudo ./deploy/bootstrap.sh
 ```

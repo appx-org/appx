@@ -1,6 +1,6 @@
 [Unit]
 Description=Appx — Agentic Application Proxy
-Documentation=https://github.com/neuromaxer/appx
+Documentation=https://github.com/appx-org/appx
 # Appx runs in container mode: it creates/supervises the agent-server OUTER
 # container via the Docker daemon, and its egress proxy binds the docker bridge
 # gateway (auto-detected from `docker network inspect bridge`), which needs

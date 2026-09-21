@@ -35,7 +35,7 @@ sudo apt-get install -y git docker.io
 sudo systemctl enable --now docker
 
 # 2. Clone appx and run bootstrap from inside it.
-git clone https://github.com/neuromaxer/appx.git /srv/appx
+git clone https://github.com/appx-org/appx.git /srv/appx
 cd /srv/appx
 sudo ./deploy/bootstrap.sh
 ```
