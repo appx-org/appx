@@ -199,4 +199,23 @@ docker logs -f builder-outer     # agent-server (inside the outer container)
 | `deploy/agent-version.sh`       | sourced, not run | Resolves `AGENT_VERSION` → `$AGENT_IMAGE` for the other scripts |
 | `deploy/appx.service`           | systemd unit     | `appx` unit (container mode; ordered after `docker.service`) |
 | `deploy/verify-installation.sh` | After any change | Full system verification                                   |
-| `deploy/teardown.sh`            | Uninstall & cleanup | Reverse everything created by bootstrap.sh                        |
+| `deploy/teardown.sh`            | Uninstall & cleanup | Reverse everything created by bootstrap.sh (see below)            |
+
+### Uninstalling
+
+```bash
+sudo ./deploy/teardown.sh                # keep all data
+sudo ./deploy/teardown.sh --purge-data   # DESTRUCTIVE: delete everything
+```
+
+Both remove the services, binaries, users, config, and the **outer container** —
+the container runs with `--restart unless-stopped`, so leaving it would keep the
+agent alive and restarting after appx is gone. Removing it is safe: its state is
+in the named volumes, and appx recreates the container on next start.
+
+`--purge-data` additionally deletes the data directory *and* both named volumes:
+`builder-workspace` (every project's files and Pi session transcripts) and
+`builder-podman-storage` (inner app images). **This is where all project data
+lives** — a purge that spared the volumes would leave every project behind and a
+later bootstrap would silently inherit the old workspace. There is no undo, and
+no backup is taken.
