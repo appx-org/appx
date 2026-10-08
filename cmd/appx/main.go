@@ -242,6 +242,30 @@ func main() {
 
 	localManager := terminal.NewLocalManager(512 * 1024) // 512 KB ring buffer
 
+	// Project terminals: in container mode the only way to reach a project's
+	// files is to exec into the outer container, since the workspace is a
+	// Docker volume with no host path. Co-located host mode falls through to a
+	// local PTY in the project directory.
+	//
+	// APPX_PROJECT_SHELL_CONTAINER names the container to exec into outside
+	// container mode, for local dev against a hand-run agent-server container
+	// whose workspace is not bind-mounted to the host.
+	var projectShell server.ProjectShellConfig
+	shellContainer := os.Getenv("APPX_PROJECT_SHELL_CONTAINER")
+	if containerMode {
+		shellContainer = envOr("APPX_AGENT_CONTAINER_NAME", containerruntime.DefaultName)
+	}
+	if shellContainer != "" {
+		projectShell.Container = &terminal.ContainerShell{
+			Bin:          containerruntime.DetectBin(os.Getenv("APPX_CONTAINER_BIN"), exec.LookPath),
+			Container:    shellContainer,
+			WorkspaceDir: envOr("APPX_PROJECT_SHELL_WORKSPACE", containerruntime.DefaultWorkspaceDest),
+			Shell:        os.Getenv("APPX_PROJECT_SHELL"),
+		}
+		log.Printf("project terminals: exec into container %q at %s",
+			projectShell.Container.Container, projectShell.Container.WorkspaceDir)
+	}
+
 	if err := server.Run(server.Config{
 		Port:             *port,
 		InternalsDir:     internalsDir,
@@ -260,6 +284,7 @@ func main() {
 		EgressStore:      egressStore,
 		EgressPending:    pendingRegistry,
 		LocalManager:     localManager,
+		ProjectShell:     projectShell,
 	}); err != nil {
 		log.Fatal(err)
 	}

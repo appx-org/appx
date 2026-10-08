@@ -44,6 +44,8 @@ type Config struct {
 	EgressStore      *egress.Store
 	EgressPending    *egress.PendingRegistry
 	LocalManager     *terminal.LocalManager
+	// ProjectShell controls how project terminals reach project files.
+	ProjectShell ProjectShellConfig
 }
 
 // Run starts the HTTPS server and blocks until it receives SIGINT/SIGTERM or
@@ -87,6 +89,7 @@ func Run(cfg Config) error {
 		HostAliases:      cfg.HostAliases,
 		AgentServerURL:   cfg.AgentServerURL,
 		AgentServerToken: cfg.AgentServerToken,
+		ProjectShell:     cfg.ProjectShell,
 	}, cfg.EgressStore, cfg.EgressPending, cfg.LocalManager)
 
 	if cfg.HTTPMode {

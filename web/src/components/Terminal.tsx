@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { createProjectShell, createServerShell, resizeShell } from '../api/client';
 
 const MAX_RETRIES = 5;
 const BASE_DELAY = 1000;
@@ -10,16 +11,17 @@ const MAX_DELAY = 8000;
 const INTENTIONAL_CODES = [1000, 4004];
 
 interface TerminalProps {
-  /** cwd is the working directory for the shell. If omitted, the server's
-   *  working directory is used. Pass project.projectDir for project terminals. */
-  cwd?: string;
+  /** projectId opens a terminal rooted in that project's directory. Omit it for
+   *  the server terminal (the appx user's login shell). The directory is
+   *  resolved server-side — the browser never supplies a path. */
+  projectId?: string;
 }
 
-/** Terminal renders an xterm.js terminal connected to a local PTY via appx's
+/** Terminal renders an xterm.js terminal connected to a PTY via appx's
  *  /api/shell endpoints (creack/pty). No agent-runtime dependency. Handles
  *  auto-reconnect with exponential backoff, resize,
  *  ring buffer replay on reconnect, and mobile copy/paste. */
-export default function Terminal({ cwd }: TerminalProps) {
+export default function Terminal({ projectId }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -65,23 +67,15 @@ export default function Terminal({ cwd }: TerminalProps) {
     term.focus();
 
     async function createShell(): Promise<string> {
-      const res = await fetch('/api/shell', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cwd: cwd ?? '' }),
-      });
-      if (!res.ok) throw new Error(`shell create failed: ${res.status}`);
-      const data = await res.json();
-      return data.id;
+      const { id } = projectId
+        ? await createProjectShell(projectId)
+        : await createServerShell();
+      return id;
     }
 
-    async function resizeShell(id: string, cols: number, rows: number) {
+    async function resize(id: string, cols: number, rows: number) {
       try {
-        await fetch(`/api/shell/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cols, rows }),
-        });
+        await resizeShell(id, cols, rows);
       } catch {
         // Non-fatal — terminal still usable without correct dimensions.
       }
@@ -101,7 +95,7 @@ export default function Terminal({ cwd }: TerminalProps) {
         setFailed(false);
         fitAddon.fit();
         term.focus();
-        resizeShell(id, term.cols, term.rows);
+        resize(id, term.cols, term.rows);
       };
 
       ws.onmessage = (ev) => {
@@ -158,7 +152,7 @@ export default function Terminal({ cwd }: TerminalProps) {
 
     const observer = new ResizeObserver(() => {
       fitAddon.fit();
-      if (shellId) resizeShell(shellId, term.cols, term.rows);
+      if (shellId) resize(shellId, term.cols, term.rows);
     });
     observer.observe(containerRef.current);
 
@@ -172,7 +166,7 @@ export default function Terminal({ cwd }: TerminalProps) {
       term.dispose();
       termRef.current = null;
     };
-  }, [cwd]);
+  }, [projectId]);
 
   const handleManualReconnect = useCallback(() => { reconnectRef.current(); }, []);
 
