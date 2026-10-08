@@ -9,8 +9,9 @@ import (
 )
 
 // handleListProjects returns the handler for GET /api/projects. It queries all
-// projects via the Manager, runs the health checker to populate AppRunning on
-// each project, and returns a JSON array ordered by creation date (newest first).
+// projects via the Manager, runs the health checker to populate AppRunning and
+// DevRunning on each project, and returns a JSON array ordered by creation date
+// (newest first).
 // Returns an empty array when no projects exist. This route is behind auth middleware.
 func handleListProjects(pm *project.Manager, hc *project.HealthChecker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +23,8 @@ func handleListProjects(pm *project.Manager, hc *project.HealthChecker) http.Han
 
 		health := hc.Check(projects)
 		for _, p := range projects {
-			p.AppRunning = health[p.ID]
+			p.AppRunning = health[p.ID].App
+			p.DevRunning = health[p.ID].Dev
 			p.ProjectDir = pm.ProjectDir(p.Name)
 		}
 
@@ -70,7 +72,8 @@ func handleCreateProject(pm *project.Manager) http.HandlerFunc {
 
 // handleGetProject returns the handler for GET /api/projects/{id}. It returns
 // the project JSON with health status or 404 if not found. This route is behind
-// auth middleware. The health checker probes the assigned port to populate AppRunning.
+// auth middleware. The health checker probes the PROD and DEV ports to populate
+// AppRunning and DevRunning.
 func handleGetProject(pm *project.Manager, hc *project.HealthChecker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -85,7 +88,8 @@ func handleGetProject(pm *project.Manager, hc *project.HealthChecker) http.Handl
 		}
 		proj.ProjectDir = pm.ProjectDir(proj.Name)
 		health := hc.Check([]*project.Project{proj})
-		proj.AppRunning = health[proj.ID]
+		proj.AppRunning = health[proj.ID].App
+		proj.DevRunning = health[proj.ID].Dev
 		writeJSON(w, proj)
 	}
 }
