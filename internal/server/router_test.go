@@ -1432,6 +1432,44 @@ func TestListProjects_HasProjectDir(t *testing.T) {
 	t.Error("project 'listapp' not found in list response")
 }
 
+// TestGetProject_OmitsProjectDirInContainerMode covers issue #7: with no host
+// view of project files (empty ProjectRoot) the API must omit projectDir rather
+// than report a host path that does not exist. The frontend keyed the project
+// terminal off this field, so a bogus value was a guaranteed 500.
+func TestGetProject_OmitsProjectDirInContainerMode(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err = db.Exec(testSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	store := auth.NewStore(db)
+	store.SetBcryptCost(bcrypt.MinCost)
+	store.SetPassword("testpassword1")
+	// Empty project root == container mode: the agent owns /workspace inside the
+	// outer container.
+	pm := project.NewManager(project.NewStore(db), "")
+	handler := NewRouter(auth.New(store), pm, fstest.MapFS{}, RouterConfig{},
+		egress.NewStore(db), nil, terminal.NewLocalManager(65536))
+
+	db.Exec("INSERT INTO projects (id, name, status, assigned_port) VALUES ('c1', 'containerapp', 'stopped', 10000)")
+
+	req := authedRequest(t, store, "GET", "/api/projects/c1", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if strings.Contains(body, "projectDir") {
+		t.Errorf("expected projectDir to be omitted in container mode, got %s", body)
+	}
+}
+
 func TestStripPort(t *testing.T) {
 	tests := []struct {
 		input, want string

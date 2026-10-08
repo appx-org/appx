@@ -64,6 +64,8 @@ type Project struct {
 	AppRunning bool `json:"appRunning"`
 	// ProjectDir is the absolute path to the project's directory on the host.
 	// Populated at query time by the Manager, not persisted in the database.
+	// Omitted in container mode: project files live in the agent's workspace
+	// volume inside the outer container, so no host path exists.
 	ProjectDir string `json:"projectDir,omitempty"`
 }
 

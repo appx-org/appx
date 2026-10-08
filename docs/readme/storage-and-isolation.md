@@ -42,6 +42,11 @@ To use a mounted volume for the host data directory, specify the path when
 bootstrap prompts for "Data directory"; bootstrap creates the subdirectories with
 correct permissions.
 
+> **Sizing:** the data directory holds only `.appx-internals/` and stays in the
+> hundreds of KB. Growth is in the two Docker volumes, so mounting a volume at
+> `APPX_DATA` gives projects no extra capacity — point Docker's data-root at the
+> volume instead. appx creates no host `projects/` directory in container mode.
+
 ## Credentials & the Agent tab
 
 Pi credentials are configured from Settings. Built-in providers can use stored
