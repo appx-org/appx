@@ -88,7 +88,9 @@ tasks:
     env:
       GOCACHE: "{{.ROOT_DIR}}/.go-build-cache"
     cmds:
-      - go test ./internal/...
+      # cmd/... is included so entry-point wiring is covered too; it needs the
+      # embedded frontend to exist, which `task build` (or CI) provides.
+      - go test ./internal/... ./cmd/...
 
   lint:
     desc: Lint frontend code

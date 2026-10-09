@@ -1,0 +1,73 @@
+name: CI
+
+# Runs the verification loop from CLAUDE.md on every PR and on main.
+#
+# The steps deliberately go through Task rather than reimplementing the build
+# here: `task build` is the documented interface (it builds the frontend, copies
+# it to cmd/appx/web/dist for go:embed, then builds Go), so driving it from CI
+# means the two cannot drift. Task is installed with `go install` at a pinned
+# version to keep this workflow on first-party actions only.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to a PR makes the in-flight run obsolete.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Must be a Task release whose own go directive is <= this repo's Go version:
+  # setup-go pins GOTOOLCHAIN=local, so `go install` will not fetch a newer
+  # toolchain to build it. v3.54.0 needs go 1.26.4 and fails against our 1.26.1.
+  TASK_VERSION: v3.53.1
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v5
+        with:
+          # Matches the Node major deploy/tools-install.sh installs on servers.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@${{ env.TASK_VERSION }}
+
+      # Build first: the Go binary embeds the compiled frontend via go:embed, so
+      # `go build ./...` cannot run until web/dist has been copied into place.
+      - name: Build (frontend + Go)
+        run: task build
+
+      - name: Lint frontend
+        run: task lint
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: task test
+
+      # Guards the agent-stack invariants that only bite at deploy time: an
+      # unformatted shell script or a deploy script that cannot be parsed is a
+      # broken install, and CI is the cheapest place to catch it.
+      - name: Shell syntax
+        run: |
+          status=0
+          for f in deploy/*.sh; do
+            bash -n "$f" || { echo "::error file=$f::bash syntax error"; status=1; }
+          done
+          exit $status
