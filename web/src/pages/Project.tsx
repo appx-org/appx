@@ -79,7 +79,8 @@ export default function Project() {
 
   // The reverse proxy routes `<name>.<domain>` to the project's PROD port and
   // `<name>-dev.<domain>` to its DEV port. The preview iframe targets DEV (the
-  // live environment the agent iterates on); "Open App" opens PROD.
+  // live environment the agent iterates on) and is gated on `devRunning`;
+  // "Open App" opens PROD and is gated on `appRunning`.
   const buildUrl = (label: string) => {
     if (!project) return '';
     const proto = window.location.protocol;
@@ -116,15 +117,15 @@ export default function Project() {
           <button style={styles.backBtn} onClick={() => navigate('/')} aria-label="Back">&#8592;</button>
           <span style={styles.projectName}>{project.name}</span>
           <span style={styles.portLabel}>:{project.assignedPort}</span>
-          {project.appRunning && (
+          {(project.appRunning || project.devRunning) && (
             <span style={styles.appBadge}>
               <span style={styles.appDot} />
-              APP RUNNING
+              {project.appRunning ? 'APP RUNNING' : 'DEV RUNNING'}
             </span>
           )}
         </div>
         <div style={styles.headerActions}>
-          {project.appRunning && (
+          {project.devRunning && (
             <button
               style={showPreview ? styles.toggleBtnActive : styles.toggleBtn}
               onClick={() => setShowPreview((v) => !v)}
@@ -163,7 +164,7 @@ export default function Project() {
           </div>
         </div>
 
-        {project.appRunning && showPreview && (
+        {project.devRunning && showPreview && (
           <div style={styles.previewPane}>
             <div style={styles.previewBar}>
               <span style={styles.previewUrl}>{devUrl}</span>
