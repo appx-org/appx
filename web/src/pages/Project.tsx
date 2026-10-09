@@ -19,8 +19,9 @@ import Terminal from '../components/Terminal';
 const CHAT_LABELS = { agentName: 'PI AGENT' };
 
 /** Project is the full-page project view with tabbed Agent/Terminal interface.
- *  The Agent tab uses Pi. The Terminal tab is a local PTY rooted in the
- *  project directory. */
+ *  The Agent tab uses Pi. The Terminal tab is a PTY rooted in the project
+ *  directory — a `docker exec` into the agent's outer container in container
+ *  mode, or a local shell when appx and the agent share a filesystem. */
 export default function Project() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -74,8 +75,6 @@ export default function Project() {
       })
       .catch(() => {});
   }, [fetchProject]);
-
-  const projectDir = project?.projectDir ?? '';
 
   // The reverse proxy routes `<name>.<domain>` to the project's PROD port and
   // `<name>-dev.<domain>` to its DEV port. The preview iframe targets DEV (the
@@ -159,7 +158,7 @@ export default function Project() {
                 <AgentChat projectId={project.name} />
               </AgentChatProvider>
             ) : (
-              <Terminal cwd={projectDir} />
+              <Terminal projectId={project.id} />
             )}
           </div>
         </div>

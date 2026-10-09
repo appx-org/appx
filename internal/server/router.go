@@ -25,6 +25,9 @@ type RouterConfig struct {
 	HostAliases      []string // additional hostnames/IPs that also serve the dashboard (e.g. server IP)
 	AgentServerURL   string   // URL of the Pi agent-server (default "http://127.0.0.1:4001")
 	AgentServerToken string   // optional bearer token for Pi agent-server
+	// ProjectShell controls how project terminals reach project files
+	// (container exec in container mode, local PTY when co-located).
+	ProjectShell ProjectShellConfig
 }
 
 // NewRouter builds the top-level HTTP handler. All requests go through auth
@@ -74,6 +77,11 @@ func NewRouter(a *auth.Auth, pm *project.Manager, webFS fs.FS, rcfg RouterConfig
 	mux.Handle("POST /api/shell", a.Middleware(limitBody(http.HandlerFunc(handleShellCreate(lm)))))
 	mux.Handle("PUT /api/shell/{id}", a.Middleware(limitBody(requireJSON(http.HandlerFunc(handleShellResize(lm))))))
 	mux.Handle("GET /api/shell/{id}/connect", a.Middleware(http.HandlerFunc(handleShellConnect(lm))))
+	// Project terminal: creates a session rooted in the project's directory.
+	// Resize and I/O reuse the /api/shell/{id} routes above, so only the create
+	// step needs to know where a project's files live.
+	mux.Handle("POST /api/projects/{id}/shell",
+		a.Middleware(limitBody(http.HandlerFunc(handleProjectShellCreate(pm, lm, rcfg.ProjectShell)))))
 
 	// agent-client SDK gateway: same-origin 1:1 mirror of the agent-server /v1
 	// contract. Mounted on the top-level mux (auth + body limit) rather than the

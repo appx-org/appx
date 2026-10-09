@@ -49,6 +49,7 @@ The outer container's **tailored seccomp profile** is a `docker run --security-o
 - `/api/pi/*`: same-origin 1:1 mirror of the agent-server `/v1` contract, consumed by the `@appx-org/agent-client` SDK. Authorizes project-scoped session traffic against the caller's registered projects (by slug) and never exposes project-lifecycle routes.
 - `/api/projects/:id/agent/*`: legacy project-scoped Pi session proxy (no remaining frontend consumer; retained pending cleanup).
 - `/api/agent/*`: shared Pi provider auth, subscription login, model, and custom provider proxy.
+- `/api/shell`, `/api/projects/:id/shell`: terminal sessions. Both return a session id; resize and WebSocket I/O then share `/api/shell/:id`. Neither takes a caller-supplied path — the server terminal uses the appx user's home, and the project terminal resolves the directory from the project id (`docker exec -w /workspace/<name>` in container mode, a local PTY when co-located).
 - `<project-name>.<base-domain>`: reverse proxy to agent-built apps on assigned ports.
 
 Auth uses a single-user password login with an `appx_session` cookie, bcrypt password hashing, rate-limited login, and 30-day sessions. TLS uses generated self-signed certificates by default or Let's Encrypt with Cloudflare DNS-01 when configured.
@@ -80,9 +81,10 @@ internal/
     agent_handlers.go          # Pi provider auth and custom-provider handlers
     project_handlers.go        # Project CRUD and app health shape
     settings_handlers.go       # Account and app settings
-    shell_handlers.go          # Local PTY shell endpoints
+    shell_handlers.go          # Server + project terminal endpoints
   terminal/
     local.go                   # Local PTY sessions for server/project terminals
+    container.go               # Builds the `docker exec` command for project terminals
   tls/
     selfsigned.go              # Self-signed certificate generation
 web/src/
@@ -151,7 +153,7 @@ Add or update tests when behavior changes, especially for server routes, databas
 - `deploy/bootstrap.sh` is first-run setup (container mode only: appx as the `appx` systemd service supervising the agent-server outer container). It needs no sibling checkouts — the agent image is pulled and the SDK comes from npm.
 - `task server:deploy` pulls code, rebuilds, installs, re-pulls the pinned agent image (re-extracting its seccomp profile), restarts `appx`, then verifies.
 - Deploy hosts must be **amd64**: the published agent-server image is amd64-only and is no longer built on the box.
-- **`APPX_DATA` holds only the DB and TLS certs** (`.appx-internals/`). Project files live in the `builder-workspace` Docker volume under Docker's data-root — mounting a volume at `APPX_DATA` gives projects no capacity. There is deliberately no host `$APPX_DATA/projects` and no shared `projects` group: in container mode appx creates no project files at all, so `hostProjectRoot` returns `""` and `Manager.ProjectDir` reports no host path.
+- **`APPX_DATA` holds only the DB and TLS certs** (`.appx-internals/`). Project files live in the `builder-workspace` Docker volume under Docker's data-root — mounting a volume at `APPX_DATA` gives projects no capacity. There is deliberately no host `$APPX_DATA/projects` and no shared `projects` group: in container mode appx creates no project files at all, so `hostProjectRoot` returns `""` and `Manager.ProjectDir` reports no host path. The project terminal therefore execs into the outer container rather than opening a host shell; `APPX_PROJECT_SHELL_CONTAINER` forces that path outside container mode (local dev against a hand-run agent-server container).
 - The agent (agent-server + Pi) runs as an unprivileged uid **inside** the outer container, not as a host user; provider secrets reach it via the service env (`/etc/appx/secrets.env`, `root:root 0600`), forwarded into the container by name.
 - The Docker daemon (`--restart unless-stopped`) keeps the outer container alive across crash + reboot; appx's startup `EnsureRunning` re-attaches idempotently (never auto-recreates on drift). `appx.service` is ordered `After=docker.service`.
 - `appx` is in the `docker` group (root-equivalent — accepted on a dedicated box; Stage 5 scopes it down). It binds 443 via `CAP_NET_BIND_SERVICE`, not root.

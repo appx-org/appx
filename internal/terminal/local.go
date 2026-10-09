@@ -56,27 +56,53 @@ func NewLocalManager(bufSize int) *LocalManager {
 	}
 }
 
-// Create spawns a new shell process with a PTY attached and registers the
-// session. cwd is the working directory for the shell; if empty it defaults
-// to the current process's working directory. Returns the new session on
-// success. The caller must eventually call Close to release resources.
+// CommandSpec describes a process to attach to a PTY. It is the seam that lets
+// a session be either a local login shell or a shell running inside the agent's
+// outer container (`docker exec`), without the session bookkeeping below caring
+// which.
+type CommandSpec struct {
+	// Name is the executable to run.
+	Name string
+	// Args are the arguments passed to it (excluding the program name).
+	Args []string
+	// Dir is the working directory. Empty inherits appx's own.
+	Dir string
+	// Env is the complete environment. Empty defaults to appx's environment
+	// plus TERM.
+	Env []string
+}
+
+// Create spawns the current user's login shell with a PTY attached and
+// registers the session. cwd is the working directory; if empty it defaults to
+// the user's home directory. Returns the new session on success. The caller
+// must eventually call Close to release resources.
 func (m *LocalManager) Create(cwd string) (*LocalSession, error) {
-	// Resolve the current user's login shell and home directory so the PTY
-	// gets a full interactive environment even when appx runs as a systemd
-	// service (which has a minimal environment without ~/.profile paths).
-	shell := "/bin/sh"
-	home := os.Getenv("HOME")
-	if u, err := user.Current(); err == nil {
+	shell, home := loginShell()
+	if cwd == "" {
+		cwd = home
+	}
+	return m.CreateCommand(CommandSpec{
+		Name: shell,
+		Args: []string{"-l"},
+		Dir:  cwd,
+		Env:  append(os.Environ(), "TERM=xterm-256color", "HOME="+home),
+	})
+}
+
+// loginShell resolves the current user's login shell and home directory so the
+// PTY gets a full interactive environment even when appx runs as a systemd
+// service (which has a minimal environment without ~/.profile paths).
+func loginShell() (shell, home string) {
+	shell = "/bin/sh"
+	home = os.Getenv("HOME")
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
 		home = u.HomeDir
-		// On Linux/macOS the Shell field comes from /etc/passwd.
-		if u.HomeDir != "" && home == "" {
-			home = u.HomeDir
-		}
 	}
 	// Prefer SHELL env var (user override), fall back to /etc/passwd lookup.
 	if s := os.Getenv("SHELL"); s != "" {
-		shell = s
-	} else if u, err := user.Current(); err == nil {
+		return s, home
+	}
+	if u, err := user.Current(); err == nil {
 		// user.Current().Shell is not available in Go stdlib; look it up
 		// from /etc/passwd via the username.
 		if out, err := exec.Command("getent", "passwd", u.Username).Output(); err == nil {
@@ -87,13 +113,23 @@ func (m *LocalManager) Create(cwd string) (*LocalSession, error) {
 			}
 		}
 	}
+	return shell, home
+}
 
-	cmd := exec.Command(shell, "-l")
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "HOME="+home)
-	if cwd != "" {
-		cmd.Dir = cwd
-	} else {
-		cmd.Dir = home
+// CreateCommand spawns an arbitrary command with a PTY attached and registers
+// the session. Used for project terminals, which run either a local shell or
+// `docker exec` into the agent's outer container. The caller must eventually
+// call Close to release resources.
+func (m *LocalManager) CreateCommand(spec CommandSpec) (*LocalSession, error) {
+	if spec.Name == "" {
+		return nil, fmt.Errorf("command spec has no executable")
+	}
+
+	cmd := exec.Command(spec.Name, spec.Args...)
+	cmd.Dir = spec.Dir
+	cmd.Env = spec.Env
+	if cmd.Env == nil {
+		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	}
 
 	// Start the command with a PTY. pty.Start both forks the process and
