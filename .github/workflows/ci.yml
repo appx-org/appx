@@ -21,7 +21,10 @@ permissions:
   contents: read
 
 env:
-  TASK_VERSION: v3.54.0
+  # Must be a Task release whose own go directive is <= this repo's Go version:
+  # setup-go pins GOTOOLCHAIN=local, so `go install` will not fetch a newer
+  # toolchain to build it. v3.54.0 needs go 1.26.4 and fails against our 1.26.1.
+  TASK_VERSION: v3.53.1
 
 jobs:
   verify:
