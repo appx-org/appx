@@ -1380,6 +1380,46 @@ func TestGetProject_HasAppRunning(t *testing.T) {
 	}
 }
 
+// TestGetProject_ReportsDevAndProdSeparately covers the devPort half of issue
+// #8: only the PROD port used to be probed, so a project serving on DEV was
+// indistinguishable from one serving nothing.
+func TestGetProject_ReportsDevAndProdSeparately(t *testing.T) {
+	handler, store, db := setupTest(t)
+
+	// DEV serves; PROD accepts nothing at all (closed port).
+	devSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer devSrv.Close()
+	devPort := devSrv.Listener.Addr().(*net.TCPAddr).Port
+
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prodPort := closed.Addr().(*net.TCPAddr).Port
+	closed.Close()
+
+	db.Exec("INSERT INTO projects (id, name, status, assigned_port, dev_port) VALUES ('d1','devapp','stopped',?,?)",
+		prodPort, devPort)
+
+	req := authedRequest(t, store, "GET", "/api/projects/d1", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		AppRunning bool `json:"appRunning"`
+		DevRunning bool `json:"devRunning"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.AppRunning {
+		t.Error("expected appRunning=false — nothing is serving on the PROD port")
+	}
+	if !resp.DevRunning {
+		t.Error("expected devRunning=true — the dev server is serving")
+	}
+}
+
 func TestGetProject_HasProjectDir(t *testing.T) {
 	handler, store, db := setupTest(t)
 	db.Exec("INSERT INTO projects (id, name, status, assigned_port) VALUES ('p1', 'myapp', 'stopped', 10000)")

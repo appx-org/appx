@@ -53,7 +53,10 @@ export interface Project {
   name: string;
   status: string;
   assignedPort: number;
+  /** A server is responding on the project's PROD port. */
   appRunning: boolean;
+  /** A server is responding on the project's DEV port (the `-dev` subdomain). */
+  devRunning: boolean;
   lastError?: string;
   createdAt: string;
   projectDir?: string;

@@ -59,9 +59,13 @@ type Project struct {
 	DevPort   int    `json:"devPort"`
 	LastError string `json:"lastError,omitempty"`
 	CreatedAt string `json:"createdAt"`
-	// AppRunning indicates whether a TCP listener is active on the project's
-	// assigned port. Populated at query time by the health checker, not persisted.
+	// AppRunning indicates whether a server is responding on the project's PROD
+	// port. Populated at query time by the health checker, not persisted.
 	AppRunning bool `json:"appRunning"`
+	// DevRunning is the same for the project's DEV port. Reported separately so
+	// a project running only its dev server is distinguishable from one running
+	// nothing. Populated at query time, not persisted.
+	DevRunning bool `json:"devRunning"`
 	// ProjectDir is the absolute path to the project's directory on the host.
 	// Populated at query time by the Manager, not persisted in the database.
 	ProjectDir string `json:"projectDir,omitempty"`
