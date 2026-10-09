@@ -5,7 +5,7 @@ import { deleteProject } from '../api/client';
 
 /** ProjectCard renders a single project as a card with app health status,
  *  assigned port, subdomain link, and delete control. The left border is
- *  color-coded: green when the app is running, muted when not started. */
+ *  color-coded: green when either environment is serving, muted when neither is. */
 export default function ProjectCard({
   project,
   onUpdate,
@@ -21,8 +21,15 @@ export default function ProjectCard({
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const statusClr = project.appRunning ? 'var(--green)' : 'var(--muted)';
-  const statusLabel = project.appRunning ? 'RUNNING' : 'NOT STARTED';
+  // A project may be serving on DEV only (the agent iterating) with nothing on
+  // PROD yet, so the two are reported separately rather than collapsed.
+  const anyRunning = project.appRunning || project.devRunning;
+  const statusClr = anyRunning ? 'var(--green)' : 'var(--muted)';
+  const statusLabel = project.appRunning
+    ? 'RUNNING'
+    : project.devRunning
+      ? 'DEV RUNNING'
+      : 'NOT STARTED';
 
   const handleDelete = async () => {
     setLoading(true);

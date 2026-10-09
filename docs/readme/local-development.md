@@ -23,7 +23,11 @@ Both are released from the
 
 Point the container's `/workspace` at the **same** projects directory appx uses.
 agent-server owns the project directories, and appx's subdomain proxy and
-terminal read them from that shared path, so the two must agree.
+project terminal read them from that shared path, so the two must agree.
+
+> If you'd rather not bind-mount, set `APPX_PROJECT_SHELL_CONTAINER=agent-server-dev`
+> when running appx. The project terminal then execs into the container (the
+> same path production uses) instead of opening a local shell on the host.
 
 Run it from the repo root so `AGENT_VERSION` resolves — that file is the single
 source of truth for which agent release this appx checkout targets, so the

@@ -41,8 +41,11 @@ else
   echo "    138.199.158.226.sslip.io    (default — subdomain routing works)"
   echo "    app.example.com             (custom domain — set APPX_DOMAIN later for Let's Encrypt)"
   echo ""
-  echo "  Data directory: stores the DB, TLS certs, and project files."
-  echo "  Use a mounted volume path if your root disk is small."
+  echo "  Data directory: stores the SQLite DB and TLS certs. It stays small."
+  echo "  Project files and agent/app images do NOT live here — they are in the"
+  echo "  builder-workspace and builder-podman-storage Docker volumes, under"
+  echo "  Docker's data-root (usually /var/lib/docker). Mount a volume there if"
+  echo "  you need capacity for projects."
   echo ""
 
   # Auto-detect public IP and default to sslip.io hostname for subdomain support.
@@ -92,7 +95,9 @@ else
 #
 # All variables:
 #   APPX_HOST   — server hostname for TLS cert and routing (default: <ip>.sslip.io)
-#   APPX_DATA   — data directory: DB, TLS certs, projects (default: /var/lib/appx)
+#   APPX_DATA   — data directory: DB + TLS certs only (default: /var/lib/appx).
+#                 Project files live in the builder-workspace Docker volume, NOT
+#                 here — mounting a volume here does not give projects capacity.
 #   APPX_PORT   — listen port (default: 443). MUST be open in firewall
 #   APPX_AGENT_SERVER_URL — Pi agent-server URL used by the Appx proxy
 #   APPX_DOMAIN — domain for Let's Encrypt via Cloudflare DNS-01 (optional)

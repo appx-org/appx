@@ -21,8 +21,11 @@ Group=appx
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
-# Ensure directories created by appx (project subdirs) have group-write so the
-# agent service user can write files via the shared projects group.
+# Group-write for files appx creates. The original reason (a host agent user
+# sharing project dirs via the `projects` group) is gone in container mode — appx
+# creates no project files at all now. Kept at 0007 rather than tightened so an
+# upgrade does not change the permissions of an existing DB/cert on disk; the
+# files that matter live in .appx-internals (0700, appx-only).
 UMask=0007
 
 # Server-specific config lives in /etc/appx/appx.env (created by bootstrap).

@@ -51,8 +51,13 @@ Port [443]: # you must open chosen port in your server firewall
 Press Enter to accept defaults. The hostname defaults to `<your-ip>.sslip.io`
 which provides free wildcard DNS — this enables subdomain routing for
 agent-built apps (e.g. `https://myapp.138.x.x.x.sslip.io`). You can also use your
-own domain here. For a persistent volume, mount it first and enter the mount path
-as the data directory.
+own domain here.
+
+The data directory holds only the SQLite DB and TLS certs, so it stays small.
+**Project files are not stored there** — they live in the `builder-workspace`
+Docker volume under Docker's data-root (usually `/var/lib/docker`). If you need
+capacity for projects, mount the volume for Docker's data-root rather than for
+`APPX_DATA`. See [Storage & Isolation](./storage-and-isolation.md).
 
 The config is saved to `/etc/appx/appx.env` and reused on subsequent runs. To
 change it later: `sudo nano /etc/appx/appx.env && sudo systemctl restart appx`.

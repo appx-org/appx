@@ -53,9 +53,15 @@ export interface Project {
   name: string;
   status: string;
   assignedPort: number;
+  /** A server is responding on the project's PROD port. */
   appRunning: boolean;
+  /** A server is responding on the project's DEV port (the `-dev` subdomain). */
+  devRunning: boolean;
   lastError?: string;
   createdAt: string;
+  /** Host path to the project directory. Absent in container mode, where the
+   *  workspace lives inside the agent's outer container. Informational only —
+   *  the project terminal is opened by project ID, not by path. */
   projectDir?: string;
 }
 
@@ -156,4 +162,28 @@ export function approveEgressRequest(id: string) {
 /** Denies a pending egress request. */
 export function denyEgressRequest(id: string) {
   return request<{ status: string }>(`/egress/pending/${id}/deny`, { method: 'POST' });
+}
+
+/** Opens a server terminal session (the appx user's login shell). POST /api/shell. */
+export function createServerShell() {
+  return request<{ id: string }>('/shell', { method: 'POST' });
+}
+
+/**
+ * Opens a terminal session rooted in a project's directory.
+ * POST /api/projects/{id}/shell.
+ *
+ * The directory is resolved server-side — in container mode this execs into the
+ * agent's outer container, since the workspace has no host path.
+ */
+export function createProjectShell(projectId: string) {
+  return request<{ id: string }>(`/projects/${projectId}/shell`, { method: 'POST' });
+}
+
+/** Resizes a terminal session's PTY. PUT /api/shell/{id}. */
+export function resizeShell(id: string, cols: number, rows: number) {
+  return request<void>(`/shell/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ cols, rows }),
+  });
 }

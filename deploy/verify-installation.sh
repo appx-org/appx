@@ -66,12 +66,6 @@ echo "=== 1. Users and groups ==="
 # ---------------------------------------------------------------------------
 
 expect_ok   "appx user exists"                id appx
-expect_ok   "projects group exists"           getent group projects
-if id -nG appx | grep -qw projects; then
-  echo "  PASS  appx is in projects group"; PASS=$((PASS + 1))
-else
-  echo "  FAIL  appx is in projects group"; FAIL=$((FAIL + 1))
-fi
 # Docker access (root-equivalent — decided for Stage 4; scoped down in Stage 5).
 if id -nG appx | grep -qw docker; then
   echo "  PASS  appx is in docker group (can drive the daemon)"; PASS=$((PASS + 1))
@@ -85,6 +79,7 @@ expect_eq "appx home dir is data dir" \
 
 # Host-mode artifacts must be gone.
 expect_deny "no host appx-agent user (host mode removed)"  id appx-agent
+expect_deny "no shared projects group (host mode removed)" getent group projects
 expect_deny "no host agent-server.service"  test -f /etc/systemd/system/agent-server.service
 expect_deny "no host /home/appx-agent dir"  test -d /home/appx-agent
 expect_deny "no host agent-server binary"   test -x /usr/local/bin/agent-server
@@ -106,9 +101,10 @@ expect_ok "internals dir exists"     test -d "$DATA_DIR/.appx-internals"
 expect_eq "internals dir is appx:appx 700" \
   "$(stat -c '%U:%G %a' "$DATA_DIR/.appx-internals" 2>/dev/null)" "appx:appx 700"
 
-expect_ok "projects dir exists"      test -d "$DATA_DIR/projects"
-expect_eq "projects dir is appx:projects 2770" \
-  "$(stat -c '%U:%G %a' "$DATA_DIR/projects" 2>/dev/null)" "appx:projects 2770"
+# No host projects dir: in container mode the workspace is the builder-workspace
+# Docker volume mounted at /workspace inside the outer container. A host
+# projects/ dir here would only ever be empty (asserted so it does not come back).
+expect_deny "no host projects dir (workspace is a docker volume)" test -d "$DATA_DIR/projects"
 
 expect_ok "seccomp profile installed" test -f /etc/appx/seccomp-builder.json
 
@@ -118,22 +114,11 @@ echo "=== 3. Isolation: appx user ==="
 # ---------------------------------------------------------------------------
 
 expect_ok   "appx can list internals dir"           su -s /bin/bash appx -c "ls $DATA_DIR/.appx-internals/"
-expect_ok   "appx can create file in projects"      su -s /bin/bash appx -c "touch $DATA_DIR/projects/.verify-ax && rm $DATA_DIR/projects/.verify-ax"
 expect_deny "appx cannot overwrite its own binary"  su -s /bin/bash appx -c "cp /usr/local/bin/appx /usr/local/bin/appx.bak"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== 4. Setgid on projects directory ==="
-# ---------------------------------------------------------------------------
-
-su -s /bin/bash appx -c "touch $DATA_DIR/projects/.verify-gid" 2>/dev/null
-FGROUP=$(stat -c '%G' "$DATA_DIR/projects/.verify-gid" 2>/dev/null || echo "MISSING")
-su -s /bin/bash appx -c "rm $DATA_DIR/projects/.verify-gid" 2>/dev/null
-expect_eq "new files inherit projects group" "$FGROUP" "projects"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== 5. Service files + secrets ==="
+echo "=== 4. Service files + secrets ==="
 # ---------------------------------------------------------------------------
 
 expect_ok "env file exists"              test -f "$ENV_FILE"
@@ -168,7 +153,7 @@ fi
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== 6. Tools ==="
+echo "=== 5. Tools ==="
 # ---------------------------------------------------------------------------
 
 expect_ok "go binary available"              command -v go
@@ -182,7 +167,7 @@ expect_ok "docker available"                 command -v docker
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== 7. Outer image ==="
+echo "=== 6. Outer image ==="
 # ---------------------------------------------------------------------------
 
 APPX_AGENT_IMAGE=$(grep '^APPX_AGENT_IMAGE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
@@ -225,7 +210,7 @@ expect_ok "installed seccomp profile matches the image's" installed_seccomp_matc
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== 8. Runtime (if appx is running) ==="
+echo "=== 7. Runtime (if appx is running) ==="
 # ---------------------------------------------------------------------------
 
 if systemctl is-active --quiet appx 2>/dev/null; then
