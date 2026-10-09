@@ -315,3 +315,18 @@ func TestManagerProjectDir_ReturnsPath(t *testing.T) {
 		t.Errorf("expected absolute path, got %q", dir)
 	}
 }
+
+// TestManagerProjectDir_EmptyRootReportsNoPath covers container mode, where appx
+// has no host view of project files. An empty root must stay empty rather than
+// resolving through filepath.Abs("") to appx's working directory — otherwise
+// ProjectDir hands out a path on the wrong filesystem (issue #7).
+func TestManagerProjectDir_EmptyRootReportsNoPath(t *testing.T) {
+	mgr := NewManager(nil, "")
+
+	if mgr.ProjectRoot != "" {
+		t.Errorf("expected ProjectRoot to stay empty, got %q", mgr.ProjectRoot)
+	}
+	if dir := mgr.ProjectDir("my-app"); dir != "" {
+		t.Errorf("expected empty project dir, got %q", dir)
+	}
+}

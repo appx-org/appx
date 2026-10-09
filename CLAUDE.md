@@ -95,7 +95,7 @@ web/src/
 deploy/
   appx.service                 # systemd unit for appx (container mode; ordered after docker.service)
   bootstrap.sh                 # Full install/update flow (container mode only)
-  system-setup.sh              # appx user, projects group, dirs, /etc/appx, docker group, unit
+  system-setup.sh              # appx user, dirs, /etc/appx, docker group, unit
   tools-install.sh             # Go, Node.js, Task, + pulls the agent image & extracts its seccomp profile
   agent-version.sh             # Sourced by the above: AGENT_VERSION -> $AGENT_IMAGE
 ```
@@ -151,6 +151,7 @@ Add or update tests when behavior changes, especially for server routes, databas
 - `deploy/bootstrap.sh` is first-run setup (container mode only: appx as the `appx` systemd service supervising the agent-server outer container). It needs no sibling checkouts — the agent image is pulled and the SDK comes from npm.
 - `task server:deploy` pulls code, rebuilds, installs, re-pulls the pinned agent image (re-extracting its seccomp profile), restarts `appx`, then verifies.
 - Deploy hosts must be **amd64**: the published agent-server image is amd64-only and is no longer built on the box.
+- **`APPX_DATA` holds only the DB and TLS certs** (`.appx-internals/`). Project files live in the `builder-workspace` Docker volume under Docker's data-root — mounting a volume at `APPX_DATA` gives projects no capacity. There is deliberately no host `$APPX_DATA/projects` and no shared `projects` group: in container mode appx creates no project files at all, so `hostProjectRoot` returns `""` and `Manager.ProjectDir` reports no host path.
 - The agent (agent-server + Pi) runs as an unprivileged uid **inside** the outer container, not as a host user; provider secrets reach it via the service env (`/etc/appx/secrets.env`, `root:root 0600`), forwarded into the container by name.
 - The Docker daemon (`--restart unless-stopped`) keeps the outer container alive across crash + reboot; appx's startup `EnsureRunning` re-attaches idempotently (never auto-recreates on drift). `appx.service` is ordered `After=docker.service`.
 - `appx` is in the `docker` group (root-equivalent — accepted on a dedicated box; Stage 5 scopes it down). It binds 443 via `CAP_NET_BIND_SERVICE`, not root.

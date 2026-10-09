@@ -33,7 +33,9 @@ type AgentRegistrar interface {
 // agent-server's project id equals the appx project name (appx names already
 // satisfy the slug grammar, so `slugify(name) == name`).
 type Manager struct {
-	Store       *Store
+	Store *Store
+	// ProjectRoot is the host directory holding project subdirectories, or ""
+	// when appx shares no filesystem with the agent (container mode).
 	ProjectRoot string
 	// BaseDomain is the external base domain used to construct each project's
 	// public DEV/PROD URLs (`<name>` / `<name>-dev`).
@@ -51,10 +53,16 @@ type Manager struct {
 // is the base directory where project subdirectories live (in a co-located
 // deployment it must equal agent-server's WORKSPACE_DIR). It is resolved to an
 // absolute path so ProjectDir always returns a stable host path.
+//
+// Pass "" when appx has no host view of project files (container mode, where the
+// agent owns /workspace inside the outer container). An empty root is preserved
+// rather than resolved — filepath.Abs("") would yield appx's working directory
+// and ProjectDir would hand out paths pointing at the wrong filesystem.
 func NewManager(store *Store, projectRoot string) *Manager {
-	abs, err := filepath.Abs(projectRoot)
-	if err == nil {
-		projectRoot = abs
+	if projectRoot != "" {
+		if abs, err := filepath.Abs(projectRoot); err == nil {
+			projectRoot = abs
+		}
 	}
 	return &Manager{
 		Store:       store,
@@ -158,12 +166,16 @@ func (m *Manager) GetByName(name string) (*Project, error) {
 	return m.Store.GetByName(name)
 }
 
-// ProjectDir returns the absolute path to the directory for the project with
-// the given name. The directory is created and owned by the agent-server; this
-// is purely a path-construction helper for control-plane features that run on a
-// shared filesystem (e.g. the local terminal). The directory may or may not
-// exist.
+// ProjectDir returns the absolute host path to the directory for the project
+// with the given name, or "" when appx has no host view of project files
+// (ProjectRoot empty — container mode). The directory is created and owned by
+// the agent-server; this is purely a path-construction helper for control-plane
+// features that run on a shared filesystem (e.g. the local terminal). The
+// directory may or may not exist.
 func (m *Manager) ProjectDir(name string) string {
+	if m.ProjectRoot == "" {
+		return ""
+	}
 	return filepath.Join(m.ProjectRoot, name)
 }
 

@@ -86,7 +86,6 @@ func main() {
 	}
 
 	internalsDir := filepath.Join(*dataDir, ".appx-internals")
-	projectRoot := filepath.Join(*dataDir, "projects")
 
 	if err := os.MkdirAll(internalsDir, 0700); err != nil {
 		log.Fatalf("create internals dir: %v", err)
@@ -190,19 +189,22 @@ func main() {
 	}
 
 	projectStore := project.NewStore(database)
-	if *httpMode {
-		// In local dev mode system-setup.sh has not been run, so create the
-		// directory on demand with permissive perms (single-user machine).
+	projectRoot := hostProjectRoot(*dataDir, containerMode)
+	if projectRoot == "" {
+		log.Printf("project files live in the agent's workspace volume (no host path)")
+	} else if *httpMode {
+		// Co-located dev: the developer bind-mounts this directory into the
+		// agent-server container, so appx creates it on demand with permissive
+		// perms (single-user machine).
 		if err := os.MkdirAll(projectRoot, 0755); err != nil {
 			log.Fatalf("create project root: %v", err)
 		}
 	} else {
-		// In production the directory is created by deploy/system-setup.sh with
-		// the correct ownership and setgid bit (appx:projects 2770). Require it
-		// to exist so a misconfigured deploy fails loudly rather than creating a
-		// directory with wrong permissions.
+		// Non-container, non-dev: appx shares a filesystem with a host
+		// agent-server. Require the directory so a misconfigured deploy fails
+		// loudly rather than creating one with the wrong permissions.
 		if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
-			log.Fatalf("project directory %s does not exist — run deploy/system-setup.sh first", projectRoot)
+			log.Fatalf("project directory %s does not exist", projectRoot)
 		}
 	}
 	pm := project.NewManager(projectStore, projectRoot)
@@ -261,6 +263,19 @@ func main() {
 	}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// hostProjectRoot returns the host directory that holds project files, or ""
+// when appx has no host view of them. In container mode the agent owns
+// WORKSPACE_DIR (/workspace) *inside* the outer container, backed by the
+// builder-workspace Docker volume, so no host path exists and `$APPX_DATA`
+// holds only the DB and TLS certs. Only a co-located deployment (host-mode
+// agent-server, used for local dev) shares a filesystem with appx.
+func hostProjectRoot(dataDir string, containerMode bool) string {
+	if containerMode {
+		return ""
+	}
+	return filepath.Join(dataDir, "projects")
 }
 
 // migrateDataDir moves legacy files from the top-level data directory into the

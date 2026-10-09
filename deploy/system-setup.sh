@@ -14,7 +14,7 @@
 #
 # What this script does:
 #   1. Reads APPX_DATA from /etc/appx/appx.env (falls back to /var/lib/appx)
-#   2. Creates the appx user (home = data dir) and the shared projects group
+#   2. Creates the appx user (home = data dir)
 #   3. Sets up directories with correct ownership and permissions
 #   4. Creates /etc/appx for config + the extracted seccomp profile
 #   5. Adds appx to the docker group so the service can drive the daemon
@@ -53,26 +53,23 @@ echo "agent backend: pi (container mode — appx supervises the outer container)
 # OS users and groups
 # ---------------------------------------------------------------------------
 
-# Shared group — appx (and, inside the container, the agent uid) reach project
-# directories through this group.
-if ! getent group projects >/dev/null 2>&1; then
-  groupadd --system projects
-  echo "created group: projects"
-else
-  echo "group projects already exists"
-fi
+# NOTE: no shared `projects` group. It existed so a host agent user and appx
+# could share $DATA_DIR/projects; in container mode the agent runs as an
+# unprivileged uid *inside* the outer container and the workspace is a Docker
+# volume, so there is no host directory to share. `appx` only needs the `docker`
+# group (granted below). teardown.sh still removes the group so upgrades from a
+# host-mode install clean it up.
 
 # appx user — runs the appx server process.
 # Home dir is the data directory so that shell sessions started by the terminal
 # feature land in the right place and have access to tools in PATH.
 if ! id -u appx >/dev/null 2>&1; then
-  useradd --system --create-home --shell /bin/bash --home-dir "$DATA_DIR" \
-    --groups projects appx
+  useradd --system --create-home --shell /bin/bash --home-dir "$DATA_DIR" appx
   echo "created user: appx (home: $DATA_DIR)"
 else
-  # Ensure existing user has correct shell, group membership, and home dir.
+  # Ensure existing user has correct shell and home dir.
   CURRENT_HOME=$(getent passwd appx | cut -d: -f6)
-  usermod --shell /bin/bash --append --groups projects appx || true
+  usermod --shell /bin/bash appx || true
   if [ "$CURRENT_HOME" != "$DATA_DIR" ]; then
     usermod --home "$DATA_DIR" appx
     echo "user appx already exists (updated home: $CURRENT_HOME → $DATA_DIR)"
@@ -85,8 +82,8 @@ fi
 # Directories
 # ---------------------------------------------------------------------------
 
-# Data dir: appx owns it. Accessible for traversal by the agent user so it can
-# reach the projects/ subdirectory inside it.
+# Data dir: appx owns it, and it holds only .appx-internals (DB + TLS certs).
+# Project files are not here — see the note below.
 install -d -o appx -g appx -m 755 "$DATA_DIR"
 echo "directory ready: $DATA_DIR (appx:appx 755)"
 
@@ -94,10 +91,12 @@ echo "directory ready: $DATA_DIR (appx:appx 755)"
 install -d -o appx -g appx -m 700 "$DATA_DIR/.appx-internals"
 echo "directory ready: $DATA_DIR/.appx-internals (appx:appx 700)"
 
-# Projects subdir: shared workspace. Setgid ensures new files inherit the
-# projects group.
-install -d -o appx -g projects -m 2770 "$DATA_DIR/projects"
-echo "directory ready: $DATA_DIR/projects (appx:projects 2770)"
+# NOTE: there is deliberately no "$DATA_DIR/projects" here. In container mode the
+# agent owns the workspace at /workspace *inside* the outer container, backed by
+# the builder-workspace Docker volume — no host directory is involved. A host
+# projects/ dir would be created, chowned, and verified while staying
+# permanently empty, which is what made operators size this volume for project
+# growth they never got.
 
 # ---------------------------------------------------------------------------
 # Container mode: config dir + docker access
